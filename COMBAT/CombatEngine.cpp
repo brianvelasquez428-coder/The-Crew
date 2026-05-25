@@ -40,7 +40,16 @@ void executeEnemyTurn(Entity* character, std::vector<Entity*>& playerTeam, std::
     character->currentStamina -= selectedMove.staminaCost;
     GameLog::Add(character->name + " uses " + selectedMove.name + "!");
     
-    std::vector<Entity*> bossTargets = getAITargets(selectedMove, playerTeam);
+    // ---> FIX: Prevent AI from targeting players with Self/Ally Support moves! <---
+    std::vector<Entity*> bossTargets;
+    if (selectedMove.target == MoveTarget::Self) {
+        bossTargets.push_back(character);
+    } else if (selectedMove.target == MoveTarget::AllAllies) {
+        for (Entity* e : enemyTeam) if (e->isAlive) bossTargets.push_back(e);
+    } else {
+        bossTargets = getAITargets(selectedMove, playerTeam);
+    }
+
     executeCombatRoutine(character, selectedMove, bossTargets, playerTeam, enemyTeam, wallet, momentum);
 }
 
@@ -49,8 +58,17 @@ void executeCombatRoutine(Entity* attacker, Move selectedMove, std::vector<Entit
     int hitsLanded = selectedMove.hitCount;
 
     if (attacker->isBoss && attacker->hiddenAbility == PassiveID::Combo) {
-        int extraHits = (rand() % 3) + 1; hitsLanded += extraHits;
-        GameLog::Add("[Combo] " + attacker->name + " adds " + std::to_string(extraHits) + " extra strikes!");
+        int chance = rand() % 100;
+        int extraHits = 0;
+        
+        if (chance < 45) extraHits = 0;      // 45% chance for 0 extra hits
+        else if (chance < 80) extraHits = 1; // 35% chance for 1 extra hit
+        else extraHits = 2;                  // 20% chance for 2 extra hits
+        
+        if (extraHits > 0) {
+            hitsLanded += extraHits;
+            GameLog::Add("[Combo] " + attacker->name + " adds " + std::to_string(extraHits) + " extra strikes!");
+        }
     }
 
     if (hitsLanded > 0 && targets.size() > 1) GameLog::Add(attacker->name + " unleashes an Area Attack!");

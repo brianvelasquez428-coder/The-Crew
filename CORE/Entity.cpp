@@ -236,7 +236,7 @@ void Entity::endOfTurnUpdate() {
 void Entity::calculateActiveStats() {
     currentAttack = baseAttack; currentDefense = baseDefense; currentSpeed = baseSpeed;
     currentBIQ = baseBIQ; currentSIQ = baseSIQ;
-    
+         
     for (auto& s : activeStatuses) {
         if (s.type == StatusType::StatModifier) {
             if (s.targetStat == StatName::ATK) currentAttack += s.value;
@@ -246,7 +246,18 @@ void Entity::calculateActiveStats() {
             if (s.targetStat == StatName::SIQ) currentSIQ += s.value;
         }
     }
-         
+    
+    // --- STANCE OVERRIDES ---
+    if (naturalAbility == PassiveID::ScrewDat && isAltStance) {
+        // Brian's Strike Stance: 
+        // BIQ becomes the higher of his current SIQ (buffs applied) or his Base SIQ (ignoring debuffs).
+        currentBIQ = std::max(currentSIQ, baseSIQ); 
+        
+        // SIQ drops to 0 for evasion/support purposes, but maxStamina is untouched.
+        currentSIQ = 0; 
+    }
+    // ------------------------
+
     currentAttack = std::max(1, currentAttack); currentDefense = std::max(0, currentDefense);
     currentSpeed = std::max(0, currentSpeed); currentBIQ = std::max(0, currentBIQ); currentSIQ = std::max(0, currentSIQ);
 }
@@ -259,34 +270,27 @@ void Entity::resetStats() {
 }
 
 void Entity::toggleStance() {
-    isAltStance = !isAltStance; combatMenu.swap(altCombatMenu); 
+    isAltStance = !isAltStance; 
+    combatMenu.swap(altCombatMenu); 
+    
     if (naturalAbility == PassiveID::ScrewDat) {
         if (isAltStance) {
-            // He shifts to Strike Stance
-            baseBIQ = baseSIQ;   // <--- BIQ perfectly matches current SIQ
-            baseSIQ = 0;         // <--- SIQ drops to 0
             screwDatDecayTimer = 0; 
-            std::cout << name << " shifted into STRIKE STANCE! (BIQ increased to match SIQ, SIQ plummeted to 0. Ultimate decay paused!)\n";
+            std::cout << name << " shifted into STRIKE STANCE! (Ultimate decay paused!)\n";
         } else {
-            // He shifts to Support Stance
-            baseSIQ = maxStamina / 2; // <--- Perfectly restores SIQ because maxStamina never changes during the fight
-            
-            // Recalculate true baseBIQ so leveling isn't destroyed
-            if (internalID == EntityID::YoungBrian) {
-                baseBIQ = 15 + ((level - 1) * 2);
+            if (screwDatStacks > 0) { 
+                screwDatDecayTimer = 2; 
+                std::cout << name << " shifted into SUPPORT STANCE! (Ultimate stacks will decay in 2 rounds!)\n"; 
             } else {
-                baseBIQ = 120; // Fallback for Adult Brian
+                std::cout << name << " shifted into SUPPORT STANCE!\n"; 
             }
-            
-            if (screwDatStacks > 0) { screwDatDecayTimer = 2; std::cout << name << " shifted into SUPPORT STANCE! (Ultimate stacks will decay in 2 rounds!)\n"; }
-            else std::cout << name << " shifted into SUPPORT STANCE! BIQ and SIQ Stats returned to normal.\n";
         }
-        calculateActiveStats(); 
-    }
-    else {
+    } else {
         if (isAltStance) std::cout << name << " shifted into their Alternate Stance!\n";
         else std::cout << name << " shifted into their Normal Stance!\n";
     }
+    // Always recalculate stats when a stance changes!
+    calculateActiveStats(); 
 }
 
 void Entity::regenerateStamina() {
@@ -314,15 +318,20 @@ void Entity::gainEXP(int expAmount) {
 void Entity::levelUp() {
     level++; expToNextLevel = expToNextLevel * 1.5;
     
-    // Type-safe checking!
-    if (internalID == EntityID::YoungBrian) { maxHP += 15; baseAttack += 4; baseDefense += 4; baseSpeed += 2; baseBIQ += 2; baseSIQ += 2; }
-    else if (internalID == EntityID::YoungPaul) { maxHP += 10; baseAttack += 5; baseDefense += 2; baseSpeed += 3; baseBIQ += 2; baseSIQ += 1; }
-    else if (internalID == EntityID::YoungVince) { maxHP += 20; baseAttack += 3; baseDefense += 5; baseSpeed += 1; baseBIQ += 1; baseSIQ += 1; }
-    
-    // --- NEW: Recalculate max stamina based on the newly upgraded SIQ ---
+    int oldMaxHP = maxHP;
+    int oldMaxStamina = maxStamina;
+
+    if (internalID == EntityID::YoungBrian) { maxHP += 17; baseAttack += 4; baseDefense += 2; baseSpeed += 3; baseBIQ += 2; baseSIQ += 3; }
+    else if (internalID == EntityID::YoungPaul) { maxHP += 12; baseAttack += 3; baseDefense += 2; baseSpeed += 3; baseBIQ += 3; baseSIQ += 2; }
+    else if (internalID == EntityID::YoungVince) { maxHP += 20; baseAttack += 4; baseDefense += 3; baseSpeed += 1; baseBIQ += 2; baseSIQ += 1; }
+    else if (internalID == EntityID::YoungJoe) { maxHP += 14; baseAttack += 4; baseDefense += 1; baseSpeed += 3; baseBIQ += 2; baseSIQ += 2; }
+    else if (internalID == EntityID::YoungJustin) { maxHP += 19; baseAttack += 2; baseDefense += 3; baseSpeed += 3; baseBIQ += 2; baseSIQ += 1; }
+
     maxStamina = baseSIQ * 2;
     
-    currentHP = maxHP; currentStamina = maxStamina;
+    currentHP += (maxHP - oldMaxHP);
+    currentStamina += (maxStamina - oldMaxStamina);
+
     std::cout << ">>> " << name << " grew to Level " << level << "! <<<\n";
     calculateActiveStats();
 }

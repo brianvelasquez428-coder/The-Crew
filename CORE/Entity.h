@@ -17,13 +17,14 @@ enum class Effect {
 // EntityID handles backend logic like level-up stats and specific boss phases
 enum class EntityID { 
     YoungBrian, YoungPaul, YoungVince, 
+    YoungJoe, YoungJustin,
     AdultBrian, AdultPaul, AdultVince, 
     BossTony, StreetThug, ScrawnyThug, Unknown 
 };
 
 // ActorID handles generic identification for features like Team-Up requirements
 enum class ActorID { 
-    Brian, Paul, Vince, Tony, Enemy 
+    Brian, Paul, Vince, Joe, Justin, Tony, Enemy 
 };
 
 // --- THE NEW MOVE CATEGORY ENUM ---
@@ -77,6 +78,10 @@ enum class MoveID {
     PaulBasic, OneTwoPunch, BobAndWeave, KnifeSlash, Haymaker,
     // Vince
     VinceBasic, Shove, MiniSledge, Sledgehammer, HoldTheLine,
+    // Young Joe
+    Windmill,
+    // Young Justin
+    Tackle,
     // Tony
     TonyP1Basic, PrecisionStrike, OlderBrother,
     TonyP2Basic, Clutch, LightsOut,

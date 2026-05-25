@@ -178,14 +178,28 @@ void DrawBattleOverlay(std::vector<Entity*>& playerTeam, std::vector<Entity*>& e
     DrawRectangleLinesEx(logRec, 2, WHITE);
     DrawText("COMBAT LOG", 1320, 620, 25, LIGHTGRAY);
     
+    std::vector<std::string> logs = GameLog::GetMessages(); 
+    
+    // ---> NEW: Dynamic Bound Clamping
+    int totalLogHeight = logs.size() * 30; // Each line is 30 pixels
+    int maxScroll = 0;
+    if (totalLogHeight > 410) { 
+        maxScroll = -(totalLogHeight - 410); // Calculates exactly how far down the log can go
+    }
+    
+    // Automatically clamp the scroll value. If a new battle starts and the log shrinks, 
+    // maxScroll becomes 0, and the old negative scroll value snaps right back to the top!
+    if (combatLogScrollY < maxScroll) combatLogScrollY = maxScroll;
+    if (combatLogScrollY > 0) combatLogScrollY = 0;
+
     // Scrolling logic
     if (CheckCollisionPointRec(GetMousePosition(), logRec)) {
         combatLogScrollY += GetMouseWheelMove() * 30;
         if (combatLogScrollY > 0) combatLogScrollY = 0;
+        if (combatLogScrollY < maxScroll) combatLogScrollY = maxScroll;
     }
 
     BeginScissorMode(1300, 660, 620, 410);
-    std::vector<std::string> logs = GameLog::GetMessages(); 
     int logY = 670 + combatLogScrollY;
     for (std::string& msg : logs) { 
         DrawText(msg.c_str(), 1320, logY, 20, WHITE); 
@@ -464,10 +478,14 @@ std::vector<Entity*> requestPlayerTargets(Entity* attacker, Move selectedMove, s
 void manageParty(std::vector<Entity*>& masterRoster, std::vector<Entity*>& activeParty) { }
 
 void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& masterRoster, std::vector<TeamUpSkill>& masterTeamUps, int inventory[3], int& wallet, int& teamMomentum, std::vector<std::string>& previouslyActiveTeamUps, bool& battleIsActive, bool canFlee) {
-    bool turnComplete = false; bool inItemMenu = false; bool inReviveMenu = false; bool inTeamUpMenu = false; bool inSwapMenu = false;
-    int swapGroup = -1; int swapIndex = -1;
+    bool turnComplete = false; bool inItemMenu = false; bool inReviveMenu = false; bool inTeamUpMenu = false; bool inSwapMenu = false; bool inActiveMenu = false;
+    ActiveID detailedActive = ActiveID::None; // For the right-click menu
+    int swapGroup = -1; int swapIndex = -1; int detailedItem = 0; // For right-clicking backpack items
+         
+    bool showDetailsPopup = false; Move detailedMove; Entity* detailedEntity = nullptr; int detailsType = 0; int pendingMomentumCost = 0;
     
-    bool showDetailsPopup = false; Move detailedMove; Entity* detailedEntity = nullptr; int detailsType = 0; int pendingMomentumCost = 0; 
+    // --- NEW: Add this variable to track which Team Up we right-clicked ---
+    std::string detailedTeamUpName = "";
     
     while (!turnComplete && battleIsActive && !WindowShouldClose()) {
         Move selectedMove; bool moveSelected = false;
@@ -476,18 +494,17 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
         DrawRectangle(550, 650, 700, 400, Fade(DARKBLUE, 0.5f)); 
         DrawRectangleLines(550, 650, 700, 400, WHITE);
         
-        // 1. Only draw the main "WHAT WILL DO" text if we are NOT in a sub-menu
-        bool isMainMenu = (!inItemMenu && !inReviveMenu && !inTeamUpMenu && !inSwapMenu);
-        if (isMainMenu) {
-            DrawText(TextFormat("WHAT WILL %s DO?", character->name.c_str()), 580, 670, 30, WHITE);
-            DrawText("[ Right-Click a Sprite or Profile Picture to Inspect! ]", 580, 710, 18, LIGHTGRAY);
-        }
+        // 1. Update this line so the main menu hides when you open the Active Skills menu!
+        bool isMainMenu = (!inItemMenu && !inReviveMenu && !inTeamUpMenu && !inSwapMenu && !inActiveMenu);
         
+        // 2. Keep your sprite clicking block right here at the top
+        // 2. Keep your sprite clicking block right here at the top
         if (!showDetailsPopup) {
             // Check Enemy Sprite Clicks
             for (Entity* e : enemyTeam) {
                 if (!e->isAlive) continue; 
                 Vector2 pos = GetBasePos(e, playerTeam, enemyTeam);
+                
                 // Updated Hitbox
                 if (CheckCollisionPointRec(GetMousePosition(), {pos.x - 20, pos.y - 20, 110, 200}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = e; detailsType = 5; showDetailsPopup = true; }
             }
@@ -498,49 +515,110 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 if (!p->isAlive) continue; 
                 Vector2 pos = GetBasePos(p, playerTeam, enemyTeam);
                 
-                // Updated Hitbox
+                // Updated Hitbox for Sprite
                 if (CheckCollisionPointRec(GetMousePosition(), {pos.x - 20, pos.y - 20, 110, 200}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
                 
-                // Profile Picture Click (DO NOT CHANGE)
+                // Hitbox for Profile Picture
                 if (CheckCollisionPointRec(GetMousePosition(), {50, 650.0f + (i * 120), 80, 80}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
             }
         }
         
+        // 3. Use the SINGLE unified scrolling block here
         if (isMainMenu) {
-            int startX = 580; int startY = 750; int buttonKeys[4] = {KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR};
+            DrawText(TextFormat("WHAT WILL %s DO?", character->name.c_str()), 580, 670, 30, WHITE);
+            DrawText("[ Scroll to see more options | Right-Click to Inspect! ]", 580, 710, 18, LIGHTGRAY);
+            
+            // --- NEW: Scroll Logic ---
+            static int mainMenuScrollY = 0;
+            
+            // Calculate how deep the menu needs to go
+            int leftItems = character->combatMenu.size();
+            int rightItems = 4; // Backpack, Team-Up, Retreat, Swap
+            if (!character->activeAbilities.empty()) rightItems++;
+            if (!character->altCombatMenu.empty()) rightItems++;
+            
+            int maxItems = std::max(leftItems, rightItems);
+            int totalHeight = maxItems * 50; 
+            int maxScroll = 0;
+            if (totalHeight > 400) maxScroll = -(totalHeight - 400);
+
+            if (mainMenuScrollY < maxScroll) mainMenuScrollY = maxScroll;
+            if (mainMenuScrollY > 0) mainMenuScrollY = 0;
+            
+            if (CheckCollisionPointRec(GetMousePosition(), {550, 650, 700, 400})) {
+                mainMenuScrollY += GetMouseWheelMove() * 30;
+                if (mainMenuScrollY > 0) mainMenuScrollY = 0;
+                if (mainMenuScrollY < maxScroll) mainMenuScrollY = maxScroll;
+            }
+            
+            BeginScissorMode(550, 650, 700, 400);
+            int leftY = 750 + mainMenuScrollY;
+            int rightY = 750 + mainMenuScrollY;
+            
+            // --- LEFT COLUMN: Combat Moves ---
+            int buttonKeys[4] = {KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR};
             for (int i = 0; i < character->combatMenu.size(); i++) {
-                Rectangle btn = { (float)startX, (float)startY + (i * 50), 300, 40 };
+                Rectangle btn = { 580.0f, (float)leftY, 300, 40 };
                 if (DrawGUIButton(btn, (std::to_string(i+1) + ". " + character->combatMenu[i].name + " [" + std::to_string(character->combatMenu[i].staminaCost) + "]").c_str(), buttonKeys[i], showDetailsPopup)) {
                     if (character->currentStamina >= character->combatMenu[i].staminaCost) { selectedMove = character->combatMenu[i]; moveSelected = true; } else GameLog::Add("[!] Not enough stamina!");
                 }
                 if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON) && !showDetailsPopup) { detailedMove = character->combatMenu[i]; detailsType = 1; showDetailsPopup = true; }
+                leftY += 50;
             }
             
-            if (DrawGUIButton({900, 750, 250, 40}, "5. Backpack", KEY_FIVE, showDetailsPopup)) inItemMenu = true;
-            if (DrawGUIButton({900, 800, 250, 40}, "6. Team-Up", KEY_SIX, showDetailsPopup)) inTeamUpMenu = true;
-            if (canFlee && DrawGUIButton({900, 850, 250, 40}, "7. Retreat", KEY_SEVEN, showDetailsPopup)) { GameLog::Add(">>> FELL BACK TO HIDEOUT <<<"); battleIsActive = false; turnComplete = true; }
+            // --- RIGHT COLUMN: Menu Actions ---
+            if (DrawGUIButton({900, (float)rightY, 250, 40}, "5. Backpack", KEY_FIVE, showDetailsPopup)) inItemMenu = true;
+            rightY += 50;
+            
+            if (DrawGUIButton({900, (float)rightY, 250, 40}, "6. Team-Up", KEY_SIX, showDetailsPopup)) inTeamUpMenu = true;
+            rightY += 50;
+            
+            if (canFlee && DrawGUIButton({900, (float)rightY, 250, 40}, "7. Retreat", KEY_SEVEN, showDetailsPopup)) { GameLog::Add(">>> FELL BACK TO HIDEOUT <<<"); battleIsActive = false; turnComplete = true; }
+            rightY += 50;
             
             int nextBtnNum = 8;
-            if (!character->altCombatMenu.empty()) {
-                if (DrawGUIButton({900, 900, 250, 40}, TextFormat("%d. Stance (%s)", nextBtnNum, character->isAltStance ? "Strike" : "Support"), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) { 
-                    character->toggleStance(); GameLog::Add(character->name + " shifted their combat stance!"); 
+            if (!character->activeAbilities.empty()) {
+                if (DrawGUIButton({900, (float)rightY, 250, 40}, TextFormat("%d. Active Skill", nextBtnNum), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) {
+                    inActiveMenu = true;
                 }
+                rightY += 50;
                 nextBtnNum++;
             }
             
-            if (DrawGUIButton({900, 950, 250, 40}, TextFormat("%d. Swap Crew", nextBtnNum), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) {
+            if (!character->altCombatMenu.empty()) {
+                if (DrawGUIButton({900, (float)rightY, 250, 40}, TextFormat("%d. Stance (%s)", nextBtnNum, character->isAltStance ? "Strike" : "Support"), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) { 
+                    character->toggleStance(); GameLog::Add(character->name + " shifted their combat stance!"); 
+                }
+                rightY += 50;
+                nextBtnNum++;
+            }
+            
+            if (DrawGUIButton({900, (float)rightY, 250, 40}, TextFormat("%d. Swap Crew", nextBtnNum), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) {
                 inSwapMenu = true;
             }
+            rightY += 50;
+            
+            EndScissorMode();
         } 
         else if (inItemMenu && !inReviveMenu) {
-            // Text Shifted up to 670 to match main menu
             DrawText("BACKPACK:", 580, 670, 30, WHITE); 
-            DrawText("[ Select an item to use ]", 580, 710, 18, LIGHTGRAY);
+            DrawText("[ Select an item to use | Right-Click to Inspect ]", 580, 710, 18, LIGHTGRAY);
             bool usedItem = false;
             
-            if (DrawGUIButton({580, 750, 300, 40}, TextFormat("1. Bandage (x%d)", inventory[0]), KEY_ONE, showDetailsPopup)) { if (inventory[0] > 0) { inventory[0]--; character->currentHP += (character->maxHP * 0.3); if (character->currentHP > character->maxHP) character->currentHP = character->maxHP; GameLog::Add(character->name + " used a Bandage!"); usedItem = true; } else GameLog::Add("Out of Bandages!"); }
-            if (DrawGUIButton({580, 800, 300, 40}, TextFormat("2. Energy Drink (x%d)", inventory[1]), KEY_TWO, showDetailsPopup)) { if (inventory[1] > 0) { inventory[1]--; character->currentStamina += 40; if (character->currentStamina > 200) character->currentStamina = 200; GameLog::Add(character->name + " drank an Energy Drink!"); usedItem = true; } else GameLog::Add("Out of Energy Drinks!"); }
-            if (DrawGUIButton({580, 850, 300, 40}, TextFormat("3. Revive (x%d)", inventory[2]), KEY_THREE, showDetailsPopup)) { if (inventory[2] > 0) { bool anyoneDead = false; for (Entity* p : playerTeam) if (!p->isAlive) anyoneDead = true; if (anyoneDead) { inItemMenu = false; inReviveMenu = true; } else GameLog::Add("Everyone is already alive!"); } else GameLog::Add("Out of Revives!"); }
+            // 1. Bandage
+            Rectangle btn1 = {580, 750, 300, 40};
+            if (DrawGUIButton(btn1, TextFormat("1. Bandage (x%d)", inventory[0]), KEY_ONE, showDetailsPopup)) { if (inventory[0] > 0) { inventory[0]--; character->currentHP += (character->maxHP * 0.3); if (character->currentHP > character->maxHP) character->currentHP = character->maxHP; GameLog::Add(character->name + " used a Bandage!"); usedItem = true; } else GameLog::Add("Out of Bandages!"); }
+            if (CheckCollisionPointRec(GetMousePosition(), btn1) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup) { detailedItem = 1; detailsType = 6; showDetailsPopup = true; }
+
+            // 2. Energy Drink
+            Rectangle btn2 = {580, 800, 300, 40};
+            if (DrawGUIButton(btn2, TextFormat("2. Energy Drink (x%d)", inventory[1]), KEY_TWO, showDetailsPopup)) { if (inventory[1] > 0) { inventory[1]--; character->currentStamina += 40; if (character->currentStamina > 200) character->currentStamina = 200; GameLog::Add(character->name + " drank an Energy Drink!"); usedItem = true; } else GameLog::Add("Out of Energy Drinks!"); }
+            if (CheckCollisionPointRec(GetMousePosition(), btn2) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup) { detailedItem = 2; detailsType = 6; showDetailsPopup = true; }
+
+            // 3. Revive
+            Rectangle btn3 = {580, 850, 300, 40};
+            if (DrawGUIButton(btn3, TextFormat("3. Revive (x%d)", inventory[2]), KEY_THREE, showDetailsPopup)) { if (inventory[2] > 0) { bool anyoneDead = false; for (Entity* p : playerTeam) if (!p->isAlive) anyoneDead = true; if (anyoneDead) { inItemMenu = false; inReviveMenu = true; } else GameLog::Add("Everyone is already alive!"); } else GameLog::Add("Out of Revives!"); }
+            if (CheckCollisionPointRec(GetMousePosition(), btn3) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup) { detailedItem = 3; detailsType = 6; showDetailsPopup = true; }
             
             if (DrawGUIButton({900, 750, 200, 40}, "4. Back [B]", KEY_FOUR, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) inItemMenu = false;
             
@@ -561,20 +639,59 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
         else if (inTeamUpMenu) {
             DrawText("TEAM-UPS:", 580, 670, 30, WHITE);
             std::vector<TeamUpSkill> activeCombos = getActiveTeamUps(playerTeam, masterTeamUps);
-            
+                         
             if (activeCombos.empty()) DrawText("No Team-Ups available.", 580, 750, 20, RED); 
             else {
                 int btnIndex = 0; int buttonKeys[4] = {KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR};
                 for (TeamUpSkill& combo : activeCombos) {
-                    // Capped button width to 350 so it doesn't touch the right edge
                     Rectangle btn = { 580.0f, 750.0f + (btnIndex * 50), 350.0f, 40.0f }; 
-                    if (DrawGUIButton(btn, (std::to_string(btnIndex + 1) + ". " + combo.name + " [" + std::to_string(combo.momentumCost) + "%]").c_str(), buttonKeys[btnIndex], showDetailsPopup)) { if (teamMomentum >= combo.momentumCost) { selectedMove = combo.moveData; pendingMomentumCost = combo.momentumCost; moveSelected = true; } else GameLog::Add("[!] Not enough Momentum!"); }
+                    if (DrawGUIButton(btn, (std::to_string(btnIndex + 1) + ". " + combo.name + " [" + std::to_string(combo.momentumCost) + "%]").c_str(), buttonKeys[btnIndex], showDetailsPopup)) { 
+                        if (teamMomentum >= combo.momentumCost) { selectedMove = combo.moveData; pendingMomentumCost = combo.momentumCost; moveSelected = true; } 
+                        else GameLog::Add("[!] Not enough Momentum!"); 
+                    }
+                    
+                    // --- NEW: Right-Click Inspection for Team Ups ---
+                    if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup) {
+                        detailedTeamUpName = combo.name;
+                        detailsType = 2; // Type 2 is for Team Ups
+                        showDetailsPopup = true;
+                    }
+                    // ------------------------------------------------
+
                     btnIndex++;
                 }
             }
             
             // Shifted Cancel button to 1000 so it sits perfectly in the gap
             if (DrawGUIButton({1000, 750, 200, 40}, "0. Cancel [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) inTeamUpMenu = false;
+        }
+        else if (inActiveMenu) {
+            DrawText("ACTIVE ABILITIES:", 580, 670, 30, ORANGE);
+            if (character->usedActiveAbilityThisTurn) {
+                DrawText("You already used an active ability this turn!", 580, 710, 20, RED);
+            } else {
+                for (int i = 0; i < character->activeAbilities.size(); i++) {
+                    ActiveID aID = character->activeAbilities[i];
+                    Rectangle btn = { 580.0f, 750.0f + (i * 50), 300.0f, 40.0f };
+                    
+                    if (DrawGUIButton(btn, (std::to_string(i+1) + ". " + getActiveName(aID)).c_str(), KEY_ONE + i, showDetailsPopup)) {
+                        Entity* activeTarget = character; // Default to self
+                        // If it's a debuff/attack, target the first alive enemy for simplicity
+                        if (aID == ActiveID::Taunt || aID == ActiveID::BodyWork || aID == ActiveID::TheDeepEnd || aID == ActiveID::RealityCheck || aID == ActiveID::AnalyzeWeakness) {
+                            for (Entity* e : enemyTeam) if (e->isAlive) { activeTarget = e; break; }
+                        }
+                        
+                        executeAbility(aID, *character, *activeTarget);
+                        character->usedActiveAbilityThisTurn = true;
+                        inActiveMenu = false;
+                    }
+                    // Right Click to Inspect
+                    if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup) {
+                        detailedActive = aID; detailsType = 4; showDetailsPopup = true;
+                    }
+                }
+            }
+            if (DrawGUIButton({900, 750, 200, 40}, "0. Back [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) inActiveMenu = false;
         }
         else if (inSwapMenu) {
             DrawText("SWAP CREW MEMBERS", 580, 670, 30, WHITE);
@@ -619,6 +736,13 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 }
                 // Highlight the selected slot
                 if (swapGroup == g && swapIndex == i) DrawRectangleLinesEx(r, 3, ORANGE);
+
+                // ---> NEW: Right-Click Inspect for Mid-Battle Swapping <---
+                if (CheckCollisionPointRec(GetMousePosition(), r) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup && e != nullptr) {
+                    detailedEntity = e; 
+                    detailsType = 5; // Triggers the full Character Inspection overlay
+                    showDetailsPopup = true; 
+                }
             };
 
             DrawText("ACTIVE:", 580, 765, 20, GREEN);
@@ -652,34 +776,172 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 DrawText(TextFormat("TARGETS: %s", getTargetText(detailedMove.target).c_str()), 550, 640, 30, SKYBLUE);
                 DrawText(TextFormat("EFFECT: %s", getEffectText(detailedMove.effect).c_str()), 550, 690, 30, PURPLE);
             } 
+            // --- NEW: TEAM UP RENDER BLOCK ---
+            else if (detailsType == 2) {
+                for (TeamUpSkill& tu : masterTeamUps) {
+                    if (tu.name == detailedTeamUpName) {
+                        DrawText(tu.name.c_str(), 550, 350, 50, GOLD); 
+                        DrawText(TextFormat("MOMENTUM COST: %d%%", tu.momentumCost), 550, 420, 30, YELLOW);
+                        DrawText(TextFormat("HITS: %d", tu.moveData.hitCount), 550, 470, 30, WHITE); 
+                        DrawText(TextFormat("POWER MULTIPLIER: %.1fx", tu.moveData.powerMultiplier), 550, 520, 30, ORANGE);
+                        DrawText(TextFormat("TARGETS: %s", getTargetText(tu.moveData.target).c_str()), 550, 590, 30, SKYBLUE); 
+                        DrawText(TextFormat("EFFECT: %s", getEffectText(tu.moveData.effect).c_str()), 550, 640, 30, PURPLE);
+                        
+                        // Parse out the required actors
+                        std::string reqs = "CREW REQUIRED: ";
+                        for (ActorID r : tu.requiredMembers) {
+                            if (r == ActorID::Brian) reqs += "Brian  ";
+                            else if (r == ActorID::Paul) reqs += "Paul  ";
+                            else if (r == ActorID::Vince) reqs += "Vince  ";
+                            else if (r == ActorID::Tony) reqs += "Tony  ";
+                        }
+                        DrawText(reqs.c_str(), 550, 690, 25, GREEN);
+                        break;
+                    }
+                }
+            }
+            else if (detailsType == 4) {
+                DrawText(getActiveName(detailedActive).c_str(), 550, 350, 50, GOLD);
+                DrawText("TYPE: ACTIVE", 550, 420, 30, LIGHTGRAY);
+                DrawText("EFFECT:", 550, 490, 25, ORANGE);
+                DrawText(getActiveDescription(detailedActive).c_str(), 550, 530, 25, WHITE);
+            }
             else if (detailsType == 5 && detailedEntity != nullptr) {
-                DrawText(TextFormat("INSPECTING: %s", detailedEntity->name.c_str()), 550, 350, 50, GOLD);
+                static int inspectScrollY = 0;
                 
-                // --- NEW: STATS DISPLAY ---
-                DrawText(TextFormat("HP: %d/%d  |  ATK: %d  |  DEF: %d  |  SPD: %d", 
-                    detailedEntity->currentHP, detailedEntity->maxHP,
-                    detailedEntity->currentAttack, detailedEntity->currentDefense, 
-                    detailedEntity->currentSpeed), 550, 410, 20, GREEN);
-                
-                DrawText(TextFormat("STM: %d/%d  |  BIQ: %d  |  SIQ: %d", 
-                    detailedEntity->currentStamina, detailedEntity->maxStamina, 
-                    detailedEntity->currentBIQ, detailedEntity->currentSIQ), 550, 440, 20, GREEN);
-                
-                int dY = 490; // Shifted downwards to accommodate stats
-                DrawText("NATURAL ABILITY:", 550, dY, 25, SKYBLUE); dY += 30; 
+                // --- NEW: Word Wrap Helper ---
+                auto wrapText = [](const std::string& text, int maxChars) {
+                    std::string wrapped = text;
+                    int lastSpace = -1;
+                    int lineStart = 0;
+                    for (int i = 0; i < wrapped.length(); i++) {
+                        if (wrapped[i] == ' ') lastSpace = i;
+                        if (i - lineStart >= maxChars && lastSpace != -1) {
+                            wrapped[lastSpace] = '\n';
+                            lineStart = lastSpace + 1;
+                            lastSpace = -1;
+                        }
+                    }
+                    return wrapped;
+                };
+
+                // Helper to count lines for spacing
+                auto countLines = [](const std::string& text) {
+                    int lines = 1;
+                    for(char c : text) if(c == '\n') lines++;
+                    return lines;
+                };
+
+                // --- PRE-CALCULATE HEIGHT FOR SCROLL CLAMPING ---
+                int predicted_dY = 530; // Base start for abilities
                 if (detailedEntity->naturalAbility != PassiveID::None) {
-                    DrawText(TextFormat("- %s: %s", getPassiveName(detailedEntity->naturalAbility).c_str(), getPassiveDescription(detailedEntity->naturalAbility).c_str()), 570, dY, 20, LIGHTGRAY); dY += 40;
+                    std::string desc = wrapText(getPassiveDescription(detailedEntity->naturalAbility), 42);
+                    predicted_dY += 28 + (countLines(desc) * 22) + 15;
                 }
-                
-                DrawText("PASSIVE ABILITIES:", 550, dY, 25, GREEN); dY += 30; 
                 for(auto& p : detailedEntity->passiveAbilities) { 
-                    DrawText(TextFormat("- %s: %s", getPassiveName(p).c_str(), getPassiveDescription(p).c_str()), 570, dY, 20, LIGHTGRAY); dY += 30; 
-                } dY += 10;
-                
-                DrawText("ACTIVE ABILITIES:", 550, dY, 25, ORANGE); dY += 30; 
-                for(auto& a : detailedEntity->activeAbilities) { 
-                    DrawText(TextFormat("- %s: %s", getActiveName(a).c_str(), getActiveDescription(a).c_str()), 570, dY, 20, LIGHTGRAY); dY += 30; 
+                    if (p == PassiveID::None) continue;
+                    std::string desc = wrapText(getPassiveDescription(p), 42);
+                    predicted_dY += 28 + (countLines(desc) * 22) + 15;
                 }
+                for(auto& a : detailedEntity->activeAbilities) { 
+                    if (a == ActiveID::None) continue;
+                    std::string desc = wrapText(getActiveDescription(a), 42);
+                    predicted_dY += 28 + (countLines(desc) * 22) + 15;
+                }
+                
+                int predicted_mY = 380;
+                predicted_mY += detailedEntity->combatMenu.size() * 115;
+                if (!detailedEntity->altCombatMenu.empty()) {
+                    predicted_mY += 55;
+                    predicted_mY += detailedEntity->altCombatMenu.size() * 115;
+                }
+                
+                int maxAbsoluteY = std::max(predicted_dY, predicted_mY);
+                int maxScroll = 0;
+                
+                if (maxAbsoluteY > 780) maxScroll = -(maxAbsoluteY - 760); 
+                
+                if (inspectScrollY < maxScroll) inspectScrollY = maxScroll;
+                if (inspectScrollY > 0) inspectScrollY = 0;
+                
+                if (CheckCollisionPointRec(GetMousePosition(), {500, 300, 920, 480})) {
+                    inspectScrollY += GetMouseWheelMove() * 40;
+                    if (inspectScrollY < maxScroll) inspectScrollY = maxScroll;
+                    if (inspectScrollY > 0) inspectScrollY = 0;
+                }
+                
+                BeginScissorMode(500, 300, 920, 480);
+                
+                DrawText(TextFormat("INSPECTING: %s", detailedEntity->name.c_str()), 530, 320 + inspectScrollY, 40, GOLD);
+                
+                // --- COLUMN 1: Stats & Abilities (Left Side) ---
+                DrawText(TextFormat("HP: %d/%d  |  ATK: %d  |  DEF: %d  |  SPD: %d", 
+                     detailedEntity->currentHP, detailedEntity->maxHP,
+                     detailedEntity->currentAttack, detailedEntity->currentDefense, 
+                     detailedEntity->currentSpeed), 530, 380 + inspectScrollY, 22, GREEN);
+                     
+                DrawText(TextFormat("STM: %d/%d  |  BIQ: %d  |  SIQ: %d", 
+                     detailedEntity->currentStamina, detailedEntity->maxStamina, 
+                     detailedEntity->currentBIQ, detailedEntity->currentSIQ), 530, 420 + inspectScrollY, 22, GREEN);
+                
+                int dY = 490 + inspectScrollY; 
+                DrawText("ABILITIES:", 530, dY, 25, SKYBLUE); dY += 40; 
+                
+                if (detailedEntity->naturalAbility != PassiveID::None) {
+                    DrawText(TextFormat("[NATURAL] %s:", getPassiveName(detailedEntity->naturalAbility).c_str()), 530, dY, 20, GOLD); dY += 28;
+                    std::string desc = wrapText(getPassiveDescription(detailedEntity->naturalAbility), 42);
+                    DrawText(desc.c_str(), 550, dY, 18, LIGHTGRAY); 
+                    dY += (countLines(desc) * 22) + 15;
+                }
+                
+                for(auto& p : detailedEntity->passiveAbilities) { 
+                    if (p == PassiveID::None) continue;
+                    DrawText(TextFormat("[PASSIVE] %s:", getPassiveName(p).c_str()), 530, dY, 20, GREEN); dY += 28;
+                    std::string desc = wrapText(getPassiveDescription(p), 42);
+                    DrawText(desc.c_str(), 550, dY, 18, LIGHTGRAY); 
+                    dY += (countLines(desc) * 22) + 15;
+                }
+                
+                for(auto& a : detailedEntity->activeAbilities) { 
+                    if (a == ActiveID::None) continue;
+                    DrawText(TextFormat("[ACTIVE] %s:", getActiveName(a).c_str()), 530, dY, 20, ORANGE); dY += 28;
+                    std::string desc = wrapText(getActiveDescription(a), 42);
+                    DrawText(desc.c_str(), 550, dY, 18, LIGHTGRAY); 
+                    dY += (countLines(desc) * 22) + 15;
+                }
+
+                // --- COLUMN 2: Moveset (Right Side) ---
+                int mY = 380 + inspectScrollY;
+                DrawText("MOVESET:", 1000, 340 + inspectScrollY, 25, PURPLE);
+                for(auto& m : detailedEntity->combatMenu) {
+                    DrawText(TextFormat("> %s [%d STM]", m.name.c_str(), m.staminaCost), 1000, mY, 22, WHITE); mY += 35;
+                    DrawText(TextFormat("  Pow: %.1fx | Hits: %d | Tgt: %s", m.powerMultiplier, m.hitCount, getTargetText(m.target).c_str()), 1000, mY, 18, LIGHTGRAY); mY += 30;
+                    DrawText(TextFormat("  Eff: %s", getEffectText(m.effect).c_str()), 1000, mY, 18, SKYBLUE); mY += 50;
+                }
+                
+                // If they have an Alt Stance (Like Brian), print it right below their standard moves!
+                if (!detailedEntity->altCombatMenu.empty()) {
+                    mY += 15; // Extra spacing
+                    DrawText("ALT STANCE MOVES:", 1000, mY, 25, PURPLE); mY += 40;
+                    for(auto& m : detailedEntity->altCombatMenu) {
+                        DrawText(TextFormat("> %s [%d STM]", m.name.c_str(), m.staminaCost), 1000, mY, 22, WHITE); mY += 35;
+                        DrawText(TextFormat("  Pow: %.1fx | Hits: %d | Tgt: %s", m.powerMultiplier, m.hitCount, getTargetText(m.target).c_str()), 1000, mY, 18, LIGHTGRAY); mY += 30;
+                        DrawText(TextFormat("  Eff: %s", getEffectText(m.effect).c_str()), 1000, mY, 18, SKYBLUE); mY += 50;
+                    }
+                }
+                
+                EndScissorMode(); // Stop clipping
+            }
+            else if (detailsType == 6) {
+                std::string iName = ""; std::string iDesc = "";
+                if (detailedItem == 1) { iName = "Bandage"; iDesc = "Restores 30% of Maximum HP."; }
+                else if (detailedItem == 2) { iName = "Energy Drink"; iDesc = "Restores 40 Stamina instantly."; }
+                else if (detailedItem == 3) { iName = "Revive"; iDesc = "Revives a knocked-out crew member with 50% HP."; }
+                
+                DrawText(iName.c_str(), 550, 350, 50, GOLD);
+                DrawText("TYPE: CONSUMABLE", 550, 420, 30, LIGHTGRAY);
+                DrawText("EFFECT:", 550, 490, 25, GREEN);
+                DrawText(iDesc.c_str(), 550, 530, 25, WHITE);
             }
             if (DrawGUIButton({550, 800, 300, 60}, "Close Info [B]", 0) || IsKeyReleased(KEY_B)) showDetailsPopup = false;
         }

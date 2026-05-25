@@ -16,6 +16,9 @@ static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string n
     e.currentStamina = e.maxStamina;
     
     e.naturalAbility = naturalAbility; e.hiddenAbility = PassiveID::None;
+    
+    // ---> FIX: Instantly populates current Attack, Defense, etc.
+    e.calculateActiveStats(); 
     return e;
 }
 
@@ -50,9 +53,28 @@ Entity buildYoungVince() {
     return vince;
 }
 
+// Other characters
+Entity buildYoungJoe() {
+    Entity joe = buildBaseStats(EntityID::YoungJoe, ActorID::Joe, "Joe", LifeStage::Young, false, 46, 14, 8, 14, 11, 11, PassiveID::CrashOut);
+    joe.level = 1;
+
+    joe.combatMenu.push_back(getMove(MoveID::Windmill));
+    joe.combatMenu.push_back(getMove(MoveID::Guard));
+    return joe;
+}
+
+Entity buildYoungJustin() {
+    Entity justin = buildBaseStats(EntityID::YoungJustin, ActorID::Justin, "Justin", LifeStage::Young, false, 59, 10, 11, 14, 11, 8, PassiveID::Mediator);
+    justin.level = 1;
+
+    justin.combatMenu.push_back(getMove(MoveID::Tackle));
+    justin.combatMenu.push_back(getMove(MoveID::Guard));
+    return justin;
+}
+
 // --- ADULT CREW (LEVEL 50) ---
 Entity buildBrian() {
-    Entity brian = buildBaseStats(EntityID::AdultBrian, ActorID::Brian, "Brian", LifeStage::Adult, false, 800, 150, 160, 140, 120, 130, PassiveID::ScrewDat);
+    Entity brian = buildBaseStats(EntityID::AdultBrian, ActorID::Brian, "Brian", LifeStage::Adult, false, 850, 190, 180, 180, 60, 100, PassiveID::ScrewDat);
     brian.level = 50; 
     brian.activeAbilities.push_back(ActiveID::AnalyzeWeakness);
     
@@ -60,22 +82,25 @@ Entity buildBrian() {
     brian.combatMenu.push_back(getMove(MoveID::BrianSupportBasic)); 
     brian.combatMenu.push_back(getMove(MoveID::BrianSupportSkill)); 
     brian.combatMenu.push_back(getMove(MoveID::BrianSupportUlt));
+    brian.combatMenu.push_back(getMove(MoveID::Guard)); 
     
     // Alt is Strike Stance
     brian.altCombatMenu.push_back(getMove(MoveID::BrianStrikeBasic)); 
     brian.altCombatMenu.push_back(getMove(MoveID::BrianStrikeSkill)); 
     brian.altCombatMenu.push_back(getMove(MoveID::BrianStrikeUlt));
+    brian.altCombatMenu.push_back(getMove(MoveID::Guard));
     return brian;
 }
 
 Entity buildPaul() {
-    Entity paul = buildBaseStats(EntityID::AdultPaul, ActorID::Paul, "Paul", LifeStage::Adult, false, 750, 190, 140, 200, 100, 80, PassiveID::CrashOut);
+    Entity paul = buildBaseStats(EntityID::AdultPaul, ActorID::Paul, "Paul", LifeStage::Adult, false, 650, 150, 140, 140, 100, 60, PassiveID::CrashOut);
     paul.level = 50;
     paul.activeAbilities.push_back(ActiveID::Adrenaline); paul.activeAbilities.push_back(ActiveID::RecklessAbandon);
+
     paul.combatMenu.push_back(getMove(MoveID::PaulBasic)); 
     paul.combatMenu.push_back(getMove(MoveID::BobAndWeave)); 
-    paul.combatMenu.push_back(getMove(MoveID::KnifeSlash)); 
     paul.combatMenu.push_back(getMove(MoveID::Haymaker));
+    paul.combatMenu.push_back(getMove(MoveID::Guard));
     return paul;
 }
 
@@ -83,8 +108,10 @@ Entity buildVince() {
     Entity vince = buildBaseStats(EntityID::AdultVince, ActorID::Vince, "Vince", LifeStage::Adult, false, 999, 170, 190, 100, 65, 50, PassiveID::Mediator);
     vince.level = 50;
     vince.activeAbilities.push_back(ActiveID::Taunt);
+
     vince.combatMenu.push_back(getMove(MoveID::VinceBasic)); 
     vince.combatMenu.push_back(getMove(MoveID::Sledgehammer)); 
     vince.combatMenu.push_back(getMove(MoveID::HoldTheLine));
+    vince.combatMenu.push_back(getMove(MoveID::Guard));
     return vince;
 }

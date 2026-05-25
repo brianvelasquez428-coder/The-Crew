@@ -85,15 +85,21 @@ int main() {
     Texture2D texBrian = LoadTexture("Brian.png");
     Texture2D texPaul = LoadTexture("Paul.png");
     Texture2D texVince = LoadTexture("Vince.png");
+    Texture2D texJoe = LoadTexture("Joe.png");
+    Texture2D texJustin = LoadTexture("Justin.png");
     
     // Set to Point filtering so the pixel art doesn't blur when stretched
     SetTextureFilter(texBrian, TEXTURE_FILTER_POINT);
     SetTextureFilter(texPaul, TEXTURE_FILTER_POINT);
     SetTextureFilter(texVince, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texJoe, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texJustin, TEXTURE_FILTER_POINT);
 
     globalSprites[ActorID::Brian] = texBrian;
     globalSprites[ActorID::Paul] = texPaul;
     globalSprites[ActorID::Vince] = texVince;
+    globalSprites[ActorID::Joe] = texJoe;
+    globalSprites[ActorID::Justin] = texJustin;
     // --------------------------
 
     std::vector<Entity*> activeParty(3, nullptr);
@@ -101,12 +107,15 @@ int main() {
     std::vector<Entity*> bench;
     
     activeParty[0] = new Entity(buildYoungBrian());
+    activeParty[1] = new Entity(buildYoungPaul());
+    activeParty[2] = new Entity(buildYoungVince());
+
+    reserves[0] = new Entity(buildYoungJoe());
+    reserves[1] = new Entity(buildYoungJustin());
     
     bench.push_back(new Entity(buildBrian()));
     bench.push_back(new Entity(buildPaul()));
     bench.push_back(new Entity(buildVince()));
-    bench.push_back(new Entity(buildYoungPaul()));
-    bench.push_back(new Entity(buildYoungVince()));
 
     int swapGroup = -1; 
     int swapIndex = -1;
@@ -150,7 +159,12 @@ int main() {
         bool bgDisabled = showDetailsPopup || showCustomSelect || showSavePopup; 
 
         if (currentScreen == TITLE) {
-            BeginDrawing(); ClearBackground(BLACK); DrawText("THE CREW", 1920/2 - MeasureText("THE CREW", 80)/2, 200, 80, RED);
+            BeginDrawing(); ClearBackground(BLACK); 
+            
+            DrawText("THE CREW", 1920/2 - MeasureText("THE CREW", 80)/2, 200, 80, RED);
+            // ---> NEW: Version Subtitle <---
+            DrawText("v1.1 Pre-Alpha", 1920/2 - MeasureText("v1.1 Pre-Alpha", 30)/2, 290, 30, GRAY);
+            
             bool hasSave = SaveSystem::DoesSaveExist(); int startX = 1920/2 - 200;
             if (hasSave) {
                 if (DrawMenuButton({(float)startX, 400, 400, 60}, "1. Continue", DARKGRAY)) { SaveSystem::LoadGame(wallet, inventory); currentScreen = HUB; }
@@ -201,11 +215,15 @@ int main() {
 
                 // 3. Rebuild everyone exactly as they are when the game launches
                 activeParty[0] = new Entity(buildYoungBrian());
+                activeParty[1] = new Entity(buildYoungPaul());
+                activeParty[2] = new Entity(buildYoungVince());
+
+                reserves[0] = new Entity(buildYoungJoe());
+                reserves[1] = new Entity(buildYoungJustin());
+
                 bench.push_back(new Entity(buildBrian()));
                 bench.push_back(new Entity(buildPaul()));
                 bench.push_back(new Entity(buildVince()));
-                bench.push_back(new Entity(buildYoungPaul()));
-                bench.push_back(new Entity(buildYoungVince()));
             }
             // -------------------------------
 
@@ -242,10 +260,16 @@ int main() {
             DrawText("[ CLICK to Select/Swap | RIGHT-CLICK to Customize ]", 100, 110, 20, LIGHTGRAY);
 
             auto getEntity = [&](int g, int i) -> Entity* {
-                if(g == 0) return activeParty[i]; else if(g == 1) return reserves[i]; else if (g == 2 && i < bench.size()) return bench[i]; return nullptr;
+                if (g == 0 && i < activeParty.size()) return activeParty[i];
+                else if (g == 1 && i < reserves.size()) return reserves[i];
+                else if (g == 2 && i < bench.size()) return bench[i];
+                return nullptr;
             };
+            
             auto setEntity = [&](int g, int i, Entity* e) {
-                if(g == 0) activeParty[i] = e; else if(g == 1) reserves[i] = e; else if(g == 2) { if(i >= bench.size()) bench.push_back(e); else bench[i] = e; }
+                if (g == 0) { if (i >= activeParty.size()) activeParty.resize(3, nullptr); activeParty[i] = e; }
+                else if (g == 1) { if (i >= reserves.size()) reserves.resize(3, nullptr); reserves[i] = e; }
+                else if (g == 2) { if (i >= bench.size()) bench.push_back(e); else bench[i] = e; }
             };
 
             auto DrawSlot = [&](Rectangle r, int g, int i) {
@@ -284,12 +308,45 @@ int main() {
         else if (currentScreen == CUSTOMIZE && selectedCharForCustomization != nullptr) {
             BeginDrawing(); ClearBackground(Fade(BLACK, 0.95f));
             DrawText(TextFormat("CUSTOMIZING: %s", selectedCharForCustomization->name.c_str()), 100, 30, 50, PURPLE);
+
+            // 1. Profile Photo (Top Left next to name)
+            if (globalSprites.count(selectedCharForCustomization->actorID)) {
+                int textWidth = MeasureText(TextFormat("CUSTOMIZING: %s", selectedCharForCustomization->name.c_str()), 50);
+                Rectangle profileDest = { (float)(100 + textWidth + 20), 20, 60, 60 };
+                Rectangle sourceCrop = {0, 0, 7, 7}; // Top half of the sprite
+                DrawTexturePro(globalSprites[selectedCharForCustomization->actorID], sourceCrop, profileDest, {0,0}, 0.0f, WHITE);
+                DrawRectangleLinesEx(profileDest, 2, WHITE);
+            }
+
+            // 2. Full Body Picture & Backstory (Bottom Middle/Right)
+            if (globalSprites.count(selectedCharForCustomization->actorID)) {
+                Rectangle fullDest = { 950, 650, 140, 300 }; 
+                
+                // ---> NEW: Draw the DARKBLUE background box first
+                Rectangle boxDest = { 930, 630, 180, 340 }; 
+                DrawRectangleRec(boxDest, DARKBLUE);
+                DrawRectangleLinesEx(boxDest, 2, WHITE);
+                
+                // Then draw the character sprite on top
+                Rectangle fullSource = {0, 0, 7, 15}; 
+                DrawTexturePro(globalSprites[selectedCharForCustomization->actorID], fullSource, fullDest, {0,0}, 0.0f, WHITE);
+
+                std::string backstory = "A determined fighter trying to make a name in the streets.";
+                if (selectedCharForCustomization->actorID == ActorID::Brian) backstory = "A natural talent who relies heavily on his sharp instincts.";
+                else if (selectedCharForCustomization->actorID == ActorID::Paul) backstory = "A fierce brawler with an explosive temper and heavy hits.";
+                else if (selectedCharForCustomization->actorID == ActorID::Vince) backstory = "The unwavering rock of the crew. Tough and unyielding.";
+                else if (selectedCharForCustomization->actorID == ActorID::Joe) backstory = "YoOOOooo.";
+                else if (selectedCharForCustomization->actorID == ActorID::Justin) backstory = "Your Favorite country white boy.";
+                
+                DrawText("CHARACTER BACKGROUND:", 1120, 750, 25, GOLD);
+                DrawText(backstory.c_str(), 1120, 790, 20, LIGHTGRAY);
+            }
             
             // --- NEW: QUICK LEVEL ADJUSTMENT FOR YOUNG CHARACTERS ---
             if (selectedCharForCustomization->currentStage == LifeStage::Young) {
-                // Level Down Button
-                if (DrawMenuButton({ 800, 35, 60, 40 }, "-", DARKGRAY, bgDisabled)) {
-                    if (selectedCharForCustomization->level > 1) {
+                // MIN Level Button
+                if (DrawMenuButton({ 710, 35, 60, 40 }, "MIN", DARKGRAY, bgDisabled)) {
+                    while (selectedCharForCustomization->level > 1) {
                         selectedCharForCustomization->level--;
                         selectedCharForCustomization->expToNextLevel /= 1.5; // Reverse the EXP scaling
                         
@@ -297,7 +354,28 @@ int main() {
                         if (id == EntityID::YoungBrian) { selectedCharForCustomization->maxHP -= 17; selectedCharForCustomization->baseAttack -= 4; selectedCharForCustomization->baseDefense -= 2; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 3; }
                         else if (id == EntityID::YoungPaul) { selectedCharForCustomization->maxHP -= 12; selectedCharForCustomization->baseAttack -= 3; selectedCharForCustomization->baseDefense -= 2; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 3; selectedCharForCustomization->baseSIQ -= 2; }
                         else if (id == EntityID::YoungVince) { selectedCharForCustomization->maxHP -= 20; selectedCharForCustomization->baseAttack -= 4; selectedCharForCustomization->baseDefense -= 3; selectedCharForCustomization->baseSpeed -= 1; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 1; }
+                        else if (id == EntityID::YoungJoe) { selectedCharForCustomization->maxHP -= 14; selectedCharForCustomization->baseAttack -= 4; selectedCharForCustomization->baseDefense -= 1; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 2; }
+                        else if (id == EntityID::YoungJustin) { selectedCharForCustomization->maxHP -= 19; selectedCharForCustomization->baseAttack -= 2; selectedCharForCustomization->baseDefense -= 3; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 1; }
+                    }
+                    selectedCharForCustomization->currentHP = selectedCharForCustomization->maxHP;
+                    selectedCharForCustomization->maxStamina = selectedCharForCustomization->baseSIQ * 2;
+                    selectedCharForCustomization->currentStamina = selectedCharForCustomization->maxStamina;
+                    selectedCharForCustomization->calculateActiveStats();
+                }
+
+                // Level Down Button (-)
+                if (DrawMenuButton({ 780, 35, 60, 40 }, "-", DARKGRAY, bgDisabled)) {
+                    if (selectedCharForCustomization->level > 1) {
+                        selectedCharForCustomization->level--;
+                        selectedCharForCustomization->expToNextLevel /= 1.5; 
                         
+                        EntityID id = selectedCharForCustomization->internalID;
+                        if (id == EntityID::YoungBrian) { selectedCharForCustomization->maxHP -= 17; selectedCharForCustomization->baseAttack -= 4; selectedCharForCustomization->baseDefense -= 2; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 3; }
+                        else if (id == EntityID::YoungPaul) { selectedCharForCustomization->maxHP -= 12; selectedCharForCustomization->baseAttack -= 3; selectedCharForCustomization->baseDefense -= 2; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 3; selectedCharForCustomization->baseSIQ -= 2; }
+                        else if (id == EntityID::YoungVince) { selectedCharForCustomization->maxHP -= 20; selectedCharForCustomization->baseAttack -= 4; selectedCharForCustomization->baseDefense -= 3; selectedCharForCustomization->baseSpeed -= 1; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 1; }
+                        else if (id == EntityID::YoungJoe) { selectedCharForCustomization->maxHP -= 14; selectedCharForCustomization->baseAttack -= 4; selectedCharForCustomization->baseDefense -= 1; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 2; }
+                        else if (id == EntityID::YoungJustin) { selectedCharForCustomization->maxHP -= 19; selectedCharForCustomization->baseAttack -= 2; selectedCharForCustomization->baseDefense -= 3; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 1; }
+
                         selectedCharForCustomization->currentHP = selectedCharForCustomization->maxHP;
                         selectedCharForCustomization->maxStamina = selectedCharForCustomization->baseSIQ * 2;
                         selectedCharForCustomization->currentStamina = selectedCharForCustomization->maxStamina;
@@ -306,15 +384,25 @@ int main() {
                 }
                 
                 // Display Current Level
-                DrawText(TextFormat("Lv %d", selectedCharForCustomization->level), 880, 40, 30, YELLOW);
+                DrawText(TextFormat("Lv %d", selectedCharForCustomization->level), 865, 40, 30, YELLOW);
                 
-                // Level Up Button
-                if (DrawMenuButton({ 980, 35, 60, 40 }, "+", DARKGRAY, bgDisabled)) {
+                // Level Up Button (+)
+                if (DrawMenuButton({ 950, 35, 60, 40 }, "+", DARKGRAY, bgDisabled)) {
                     if (selectedCharForCustomization->level < 15) {
                         selectedCharForCustomization->levelUp();
                     }
                 }
+
+                // MAX Level Button
+                if (DrawMenuButton({ 1020, 35, 60, 40 }, "MAX", DARKGRAY, bgDisabled)) {
+                    while (selectedCharForCustomization->level < 15) {
+                        selectedCharForCustomization->levelUp();
+                    }
+                    selectedCharForCustomization->currentHP = selectedCharForCustomization->maxHP;
+                    selectedCharForCustomization->currentStamina = selectedCharForCustomization->maxStamina;
+                }
             }
+            // --------------------------------------------------------
             // --------------------------------------------------------
             
             // --- NEW: QUICK LEVEL ADJUSTMENT FOR YOUNG CHARACTERS ---
@@ -342,7 +430,9 @@ int main() {
             // --- NEW: Stance Toggle Logic ---
             if (selectedCharForCustomization->actorID == ActorID::Brian) {
                 DrawText(editingAltStance ? "ALT MOVESET (STRIKE):" : "MOVESET (SUPPORT):", 100, 150, 30, GREEN);
-                if (DrawMenuButton({440, 145, 110, 40}, editingAltStance ? "-> SUPPORT" : "-> STRIKE", DARKGRAY, bgDisabled)) {
+                
+                // Pushed from X:440 to X:520 to give the text more breathing room, widened button slightly
+                if (DrawMenuButton({520, 145, 130, 40}, editingAltStance ? "-> SUPPORT" : "-> STRIKE", DARKGRAY, bgDisabled)) {
                     editingAltStance = !editingAltStance;
                 }
             } else {
@@ -402,32 +492,91 @@ int main() {
             if (DrawMenuButton({100, 850, 300, 60}, "Back to Party [B]", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyReleased(KEY_B))) currentScreen = PARTY;
 
             if (showCustomSelect) {
-                DrawRectangle(0, 0, 1920, 1080, Fade(BLACK, 0.95f)); DrawText("SELECT NEW ABILITY [Right-Click to Preview]", 100, 100, 50, WHITE);
+                static int customScrollY = 0;
+
+                DrawRectangle(0, 0, 1920, 1080, Fade(BLACK, 0.95f)); 
+                DrawText("SELECT NEW ABILITY [Right-Click to Preview]", 100, 100, 50, WHITE);
                 
-                int gridX = 100; int gridY = 200;
+                // --- SCROLL BOUNDARY LOGIC ---
+                Rectangle scrollBounds = { 80, 180, 1760, 740 }; 
+
+                // Calculate the max scroll limit dynamically based on items
+                int totalContentHeight = 0;
+                if (customSlotType == 1) {
+                    totalContentHeight += 70; // Unequip button
+                    std::vector<MoveCategory> categories = { MoveCategory::Basic, MoveCategory::Skill, MoveCategory::Ultimate, MoveCategory::Support };
+                    for (MoveCategory cat : categories) {
+                        totalContentHeight += 40; 
+                        int itemsInCat = 0;
+                        for (int i = 1; i < poolMoves.size(); i++) { if (getMove(poolMoves[i]).category == cat) itemsInCat++; }
+                        totalContentHeight += ((itemsInCat + 3) / 4) * 60; 
+                        totalContentHeight += 10;
+                    }
+                } else if (customSlotType == 2) {
+                    totalContentHeight = ((MASTER_PASSIVE_POOL.size() + 3) / 4) * 70;
+                } else if (customSlotType == 3) {
+                    totalContentHeight = ((MASTER_ACTIVE_POOL.size() + 3) / 4) * 70;
+                }
+                
+                int maxScroll = 0;
+                if (totalContentHeight > 740) maxScroll = -(totalContentHeight - 740);
+
+                if (customScrollY < maxScroll) customScrollY = maxScroll;
+                if (customScrollY > 0) customScrollY = 0;
+
+                // Capture Mouse Wheel
+                if (CheckCollisionPointRec(GetMousePosition(), scrollBounds)) {
+                    customScrollY += GetMouseWheelMove() * 50; 
+                    if (customScrollY > 0) customScrollY = 0; 
+                    if (customScrollY < maxScroll) customScrollY = maxScroll;
+                }
+
+                // Disable clicks on list items if hovering outside the box or if a detail popup is open
+                bool listDisabled = showDetailsPopup || !CheckCollisionPointRec(GetMousePosition(), scrollBounds);
+                
+                BeginScissorMode(scrollBounds.x, scrollBounds.y, scrollBounds.width, scrollBounds.height);
+                // -----------------------------
+
+                int gridX = 100; 
+                int gridY = 200 + customScrollY; // Inject the scroll offset here
                 
                 if (customSlotType == 1) { 
-                    for (int i = 0; i < poolMoves.size(); i++) {
-                        MoveID mID = poolMoves[i];
-                        std::string label = (mID == MoveID::None) ? "--> UNEQUIP <--" : getMoveName(mID);
-                        Rectangle btn = { (float)gridX, (float)gridY, 350.0f, 50.0f };
+                    Rectangle unequipBtn = { 100.0f, (float)gridY, 350.0f, 50.0f };
+                    if (DrawMenuButton(unequipBtn, "--> UNEQUIP <--", MAROON, listDisabled)) {
+                        std::vector<Move>& targetMenu = editingAltStance ? selectedCharForCustomization->altCombatMenu : selectedCharForCustomization->combatMenu;
+                        if (targetMenu.size() > 1) targetMenu.erase(targetMenu.begin() + customSlotIndex);
+                        showCustomSelect = false; customScrollY = 0; // Reset scroll
+                    }
+                    gridY += 70; 
+
+                    std::vector<MoveCategory> categories = { MoveCategory::Basic, MoveCategory::Skill, MoveCategory::Ultimate, MoveCategory::Support };
+                    
+                    for (MoveCategory cat : categories) {
+                        DrawText(getCategoryName(cat).c_str(), 100, gridY, 30, SKYBLUE);
+                        gridY += 40; gridX = 100;
                         
-                        if (DrawMenuButton(btn, label.c_str(), DARKGRAY, showDetailsPopup)) {
-                            // --- NEW: Applies the move to the currently viewed stance! ---
-                            std::vector<Move>& targetMenu = editingAltStance ? selectedCharForCustomization->altCombatMenu : selectedCharForCustomization->combatMenu;
+                        for (int i = 1; i < poolMoves.size(); i++) { 
+                            MoveID mID = poolMoves[i];
+                            Move m = getMove(mID);
                             
-                            if (mID == MoveID::None) {
-                                if (targetMenu.size() > 1) 
-                                    targetMenu.erase(targetMenu.begin() + customSlotIndex);
-                            } else {
-                                targetMenu[customSlotIndex] = getMove(mID);
+                            if (m.category == cat) {
+                                Rectangle btn = { (float)gridX, (float)gridY, 350.0f, 50.0f };
+                                
+                                if (DrawMenuButton(btn, m.name.c_str(), DARKGRAY, listDisabled)) {
+                                    std::vector<Move>& targetMenu = editingAltStance ? selectedCharForCustomization->altCombatMenu : selectedCharForCustomization->combatMenu;
+                                    targetMenu[customSlotIndex] = getMove(mID);
+                                    showCustomSelect = false; customScrollY = 0; // Reset scroll
+                                }
+                                if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !listDisabled) {
+                                    detailedMove = getMove(mID); detailsType = 1; showDetailsPopup = true;
+                                }
+                                
+                                gridX += 370; 
+                                if (gridX > 1500) { gridX = 100; gridY += 60; }
                             }
-                            showCustomSelect = false;
                         }
-                        if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup && mID != MoveID::None) {
-                            detailedMove = getMove(mID); detailsType = 1; showDetailsPopup = true;
-                        }
-                        gridX += 370; if (gridX > 1500) { gridX = 100; gridY += 70; }
+                        if (gridX != 100) gridY += 60; 
+                        gridY += 10; 
                     }
                 } else if (customSlotType == 2) { 
                     for (int i = 0; i < MASTER_PASSIVE_POOL.size(); i++) {
@@ -435,12 +584,12 @@ int main() {
                         std::string label = (pID == PassiveID::None) ? "--> UNEQUIP <--" : getPassiveName(pID);
                         Rectangle btn = { (float)gridX, (float)gridY, 350.0f, 50.0f };
                         
-                        if (DrawMenuButton(btn, label.c_str(), DARKGRAY, showDetailsPopup)) {
+                        if (DrawMenuButton(btn, label.c_str(), DARKGRAY, listDisabled)) {
                             if (pID == PassiveID::None) selectedCharForCustomization->passiveAbilities.erase(selectedCharForCustomization->passiveAbilities.begin() + customSlotIndex);
                             else selectedCharForCustomization->passiveAbilities[customSlotIndex] = pID;
-                            showCustomSelect = false;
+                            showCustomSelect = false; customScrollY = 0; // Reset scroll
                         }
-                        if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup && pID != PassiveID::None) {
+                        if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !listDisabled && pID != PassiveID::None) {
                             detailedPassive = pID; detailsType = 3; showDetailsPopup = true;
                         }
                         gridX += 370; if (gridX > 1500) { gridX = 100; gridY += 70; }
@@ -451,19 +600,25 @@ int main() {
                         std::string label = (aID == ActiveID::None) ? "--> UNEQUIP <--" : getActiveName(aID);
                         Rectangle btn = { (float)gridX, (float)gridY, 350.0f, 50.0f };
                         
-                        if (DrawMenuButton(btn, label.c_str(), DARKGRAY, showDetailsPopup)) {
+                        if (DrawMenuButton(btn, label.c_str(), DARKGRAY, listDisabled)) {
                             if (aID == ActiveID::None) selectedCharForCustomization->activeAbilities.erase(selectedCharForCustomization->activeAbilities.begin() + customSlotIndex);
                             else selectedCharForCustomization->activeAbilities[customSlotIndex] = aID;
-                            showCustomSelect = false;
+                            showCustomSelect = false; customScrollY = 0; // Reset scroll
                         }
-                        if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup && aID != ActiveID::None) {
+                        if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !listDisabled && aID != ActiveID::None) {
                             detailedActive = aID; detailsType = 4; showDetailsPopup = true;
                         }
                         gridX += 370; if (gridX > 1500) { gridX = 100; gridY += 70; }
                     }
                 }
                 
-                if (DrawMenuButton({100, 950, 300, 60}, "Cancel [B]", MAROON, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) showCustomSelect = false;
+                EndScissorMode(); // Stop clipping visuals
+                
+                // Cancel button stays out of the Scissor block so it remains pinned to the bottom
+                if (DrawMenuButton({100, 950, 300, 60}, "Cancel [B]", MAROON, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) {
+                    showCustomSelect = false;
+                    customScrollY = 0; // Reset scroll
+                }
             }
             if (showDetailsPopup) DrawDetailsOverlay(showDetailsPopup, detailsType, detailedMove, detailedTeamUpName, detailedPassive, detailedActive, masterTeamUps);
             EndDrawing();
@@ -484,10 +639,37 @@ int main() {
             DrawRectangle(450, 150, 1400, 800, Fade(BLACK, 0.8f)); DrawRectangleLines(450, 150, 1400, 800, WHITE);
 
             // --- SCROLL LOGIC ---
-            // Only allow scrolling if the mouse is hovering over the display box
+            // Dynamically calculate encyclopedia heights to prevent infinite scrolling
+            int totalContentHeight = 0;
+            if (activeTab == 0) {
+                totalContentHeight += 60;
+                std::vector<MoveCategory> categories = { MoveCategory::Basic, MoveCategory::Skill, MoveCategory::Ultimate, MoveCategory::Support };
+                for (MoveCategory cat : categories) {
+                    totalContentHeight += 60;
+                    for (int i = 1; i < poolMoves.size(); i++) { if (getMove(poolMoves[i]).category == cat) totalContentHeight += 60; }
+                    totalContentHeight += 40; 
+                }
+            } else if (activeTab == 1) {
+                totalContentHeight = 60 + (MASTER_PASSIVE_POOL.size() - 1) * 80;
+            } else if (activeTab == 2) {
+                totalContentHeight = 60 + (MASTER_ACTIVE_POOL.size() - 1) * 80;
+            } else if (activeTab == 3) {
+                totalContentHeight += 120;
+                for (TeamUpSkill tu : masterTeamUps) if (tu.requiredMembers.size() == 3) totalContentHeight += 80;
+                totalContentHeight += 100;
+                for (TeamUpSkill tu : masterTeamUps) if (tu.requiredMembers.size() == 2) totalContentHeight += 80;
+            }
+
+            int maxScroll = 0;
+            if (totalContentHeight > 800) maxScroll = -(totalContentHeight - 800);
+
+            if (scrollY < maxScroll) scrollY = maxScroll;
+            if (scrollY > 0) scrollY = 0;
+
             if (CheckCollisionPointRec(GetMousePosition(), {450, 150, 1400, 800})) {
-                scrollY += GetMouseWheelMove() * 40; // 40 pixels per scroll notch
-                if (scrollY > 0) scrollY = 0; // Prevent scrolling down past the top
+                scrollY += GetMouseWheelMove() * 40; 
+                if (scrollY > 0) scrollY = 0; 
+                if (scrollY < maxScroll) scrollY = maxScroll;
             }
             
             // Disable clicks on list items if the mouse is outside the scissor box
@@ -591,20 +773,25 @@ int main() {
             }
 
             // PASSING RESERVES INTO START BATTLE
-            startBattle(reserves, fightParty, enemyTeam, masterTeamUps, inventory, wallet, true); 
-            
+            startBattle(reserves, fightParty, enemyTeam, masterTeamUps, inventory, wallet, true);
+                         
             // RE-SYNC SWAPPED PARTY MEMBERS
             activeParty.clear();
             activeParty.resize(3, nullptr);
             for (size_t i = 0; i < fightParty.size() && i < 3; i++) {
                 activeParty[i] = fightParty[i];
             }
-
+            
+            // ---> NEW: Re-sync Reserves to guarantee 3 slots <---
+            reserves.resize(3, nullptr);
+            
             currentScreen = HUB;
         }
     }
     UnloadTexture(texBrian);
     UnloadTexture(texPaul);
     UnloadTexture(texVince);
+    UnloadTexture(texJoe);
+    UnloadTexture(texJustin);
     CloseWindow(); return 0;
 }

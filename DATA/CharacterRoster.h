@@ -6,6 +6,10 @@ Entity buildYoungBrian();
 Entity buildYoungPaul();
 Entity buildYoungVince();
 
+// Other characters
+Entity buildYoungJoe();
+Entity buildYoungJustin();
+
 // Late game
 Entity buildBrian();
 Entity buildPaul();

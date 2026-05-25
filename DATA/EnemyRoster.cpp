@@ -15,21 +15,30 @@ static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string n
     e.currentStamina = e.maxStamina;
     
     e.naturalAbility = naturalAbility; e.hiddenAbility = PassiveID::None;
+    
+    // ---> FIX: Instantly populates current Attack, Defense, etc.
+    e.calculateActiveStats(); 
     return e;
 }
 
 Entity buildScrawnyThug() {
     Entity thug = buildBaseStats(EntityID::ScrawnyThug, ActorID::Enemy, "Scrawny Thug", LifeStage::Young, false,
-                                   20, 6, 3, 5, 2, 2, PassiveID::None);
-    thug.combatMenu.push_back( getMove(MoveID::ClumsySwing) );
+                                   20, 6, 3, 5, 2, 3, PassiveID::None);
+
+    thug.combatMenu.push_back( getMove(MoveID::Strike));
+    thug.combatMenu.push_back( getMove(MoveID::Guard));
+
     thug.expDropValue = 100; thug.moneyDropValue = 1; 
     return thug;
 }
 
 Entity buildStreetThug() {
     Entity thug = buildBaseStats(EntityID::StreetThug, ActorID::Enemy, "Street Thug", LifeStage::Young, false,
-                                   20, 6, 3, 5, 2, 2, PassiveID::None);
-    thug.combatMenu.push_back( getMove(MoveID::ClumsySwing) );
+                                   20, 6, 3, 5, 2, 3, PassiveID::None);
+
+    thug.combatMenu.push_back( getMove(MoveID::Strike));
+    thug.combatMenu.push_back( getMove(MoveID::Guard));
+
     thug.expDropValue = 100; thug.moneyDropValue = 1; 
     return thug;
 }

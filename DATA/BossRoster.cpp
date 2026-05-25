@@ -16,11 +16,16 @@ static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string n
     e.currentStamina = e.maxStamina;
     
     e.naturalAbility = naturalAbility; e.hiddenAbility = PassiveID::None;
+    
+    // ---> FIX: Instantly populates current Attack, Defense, etc.
+    e.calculateActiveStats(); 
     return e;
 }
 
 Entity buildTony() {
     Entity boss = buildBaseStats(EntityID::BossTony, ActorID::Tony, "Tony", LifeStage::Adult, true, 1500, 240, 260, 220, 150, 110, PassiveID::Sparring);
+    boss.hiddenAbility = PassiveID::Combo;
+
     boss.activeAbilities.push_back(ActiveID::BodyWork);
     boss.activeAbilities.push_back(ActiveID::SlippingPunches);
     
