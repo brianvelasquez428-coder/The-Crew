@@ -75,6 +75,10 @@ void executeCombatRoutine(Entity* attacker, Move selectedMove, std::vector<Entit
         else if (isSupport && target == targets[0]) AnimateSupport(attacker, playerTeam, enemyTeam, momentum);
         
         executeMoveEffect(selectedMove.effect, *attacker, *target);
+        
+        // ---> ADDED: Tell the engine to animate the Buff/Debuff text!
+        AnimatePopupsForEntity(attacker, playerTeam, enemyTeam, momentum);
+        AnimatePopupsForEntity(target, playerTeam, enemyTeam, momentum);
                  
         if (hitsLanded > 0 && !isSupport) {
             for (int h = 1; h <= hitsLanded; h++) {
@@ -95,11 +99,21 @@ void executeCombatRoutine(Entity* attacker, Move selectedMove, std::vector<Entit
                  }
                 if (target->hitNullificationStacks > 0) { target->hitNullificationStacks--; GameLog::Add("* CLANG! " + target->name + " nullified the hit! *"); continue; }
                 int critChance = std::max(1, 5 + (biqDifference / 10)); bool isCrit = (rand() % 100) < critChance;
-                int rawHitDamage = std::max(1, baseDamagePerHit + ((rand() % 5) - 2));
+/*LOOK*/        int rawHitDamage = std::max(1, baseDamagePerHit /*+ ((rand() % 5) - 2)*/);
+                // Replaced with this:
                 bool wasAlive = target->isAlive;
-                int hpBefore = target->currentHP; target->takeDamage(rawHitDamage, isCrit); int actualDamage = hpBefore - target->currentHP;
+                int actualDamage = target->takeDamage(rawHitDamage, isCrit); // <--- Now gets the pure, un-clamped damage!
                 if (isCrit) GameLog::Add("CRITICAL HIT! " + target->name + " takes " + std::to_string(actualDamage) + " damage!"); else GameLog::Add(target->name + " takes " + std::to_string(actualDamage) + " damage.");
                 AnimateHit(target, actualDamage, isCrit, false, playerTeam, enemyTeam, momentum, hitDelayFrames);
+                
+                // ---> ADDED: Triggers popups for Passives that activate on taking damage
+                AnimatePopupsForEntity(target, playerTeam, enemyTeam, momentum);
+
+                // ---> ADDED: Tells the engine to freeze and show the Phase Shift screen
+                if (target->checkPhaseTransition()) {
+                    AnimatePhaseTransition(target->currentPhase, playerTeam, enemyTeam, momentum);
+                }
+
                 if (wasAlive && !target->isAlive) {
                     GameLog::Add(target->name + " has been defeated!");
                     AnimateDeath(target, playerTeam, enemyTeam, momentum); 
@@ -115,7 +129,7 @@ void executeCombatRoutine(Entity* attacker, Move selectedMove, std::vector<Entit
         }
     }
     
-    // ---> FIX: Only Animate Return once all targets have been fully processed
+    // Only Animate Return once all targets have been fully processed
     if (!isSupport) {
         AnimateReturn(attacker, playerTeam, enemyTeam, momentum);
     }

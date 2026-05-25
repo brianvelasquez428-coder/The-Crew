@@ -59,6 +59,37 @@ void Entity::addStatus(StatusEffect s) {
             }
         }
     }
+    
+    // --- NEW: Simplified Popup Text Logic ---
+    bool isBuff = true;
+    if (s.type == StatusType::StatModifier && s.value < 0) isBuff = false;
+    if (s.type == StatusType::Bleed || s.type == StatusType::Stun || s.type == StatusType::StaminaPenalty || s.type == StatusType::Taunt) isBuff = false;
+
+    std::string pText = "";
+    if (s.type == StatusType::StatModifier) {
+        std::string statName = "";
+        if (s.targetStat == StatName::ATK) statName = "ATK";
+        else if (s.targetStat == StatName::DEF) statName = "DEF";
+        else if (s.targetStat == StatName::SPD) statName = "SPD";
+        else if (s.targetStat == StatName::BIQ) statName = "BIQ";
+        else if (s.targetStat == StatName::SIQ) statName = "SIQ";
+
+        if (s.value > 0) pText = statName + " UP";
+        else pText = statName + " DOWN";
+    } 
+    else if (s.type == StatusType::Bleed) pText = "BLEED";
+    else if (s.type == StatusType::Stun) pText = "STUN";
+    else if (s.type == StatusType::Taunt) pText = "TAUNT";
+    else if (s.type == StatusType::StaminaPenalty) pText = "STAMINA DOWN"; // <--- FIXED THIS!
+    else {
+        // Fallback: If any other custom statuses slip through, we force them to be short here
+        std::string rawName = getStatusName(s.id);
+        if (rawName == "Wind Knocked Out") pText = "STAMINA DOWN";
+        else pText = rawName; 
+    }
+
+    pendingPopups.push_back({pText, isBuff});
+
     activeStatuses.push_back(s);
     calculateActiveStats();
 }
@@ -79,17 +110,30 @@ void Entity::removeStatusByType(StatusType type) {
     calculateActiveStats();
 }
 
-void Entity::takeDamage(int rawDamage, bool isCritical) {
+// In CORE/Entity.cpp (Around line 70)
+
+int Entity::takeDamage(int rawDamage, bool isCritical) {
     if (shieldHP > 0 && isCriticalOnlyShield == true) {
-        if (!isCritical) { std::cout << name << "'s filter absorbed the attack! (0 Damage)\n"; return; }
+        if (!isCritical) { 
+            std::cout << name << "'s filter absorbed the attack! (0 Damage)\n"; 
+            return 0; // <--- Returns 0 if blocked
+        }
         else std::cout << "Critical Strike Pierces though the filter!\n";
     }
          
     float defenseMultiplier = 100.0f / (100.0f + currentDefense);       
-    int finalDamage = rawDamage * defenseMultiplier;                    
-    if (isCritical) finalDamage = finalDamage * 1.5;
-    finalDamage = std::max(1, finalDamage);
+    float calculatedDamage = rawDamage * defenseMultiplier;                    
     
+    if (isCritical) {
+        calculatedDamage *= 2.0f;
+    }
+    
+    float variance = 1.0f + (((rand() % 21) - 10) / 100.0f);
+    calculatedDamage *= variance;
+    
+    int finalDamage = std::max(1, (int)calculatedDamage);
+    
+    // ... [The rest of your shield / HP deduction logic stays exactly the same from here down]
     if (shieldHP > 0) {
         int damageToShield = std::min(shieldHP, finalDamage);
         shieldHP -= damageToShield;
@@ -113,6 +157,8 @@ void Entity::takeDamage(int rawDamage, bool isCritical) {
         else std::cout << "   " << name << " takes " << finalDamage << " damage! (" << currentHP << " HP remaining)\n";
     }
     if (currentHP <= 0) { currentHP = 0; isAlive = false; std::cout << "\n>>> " << name << " has been knocked out! <<<\n"; }
+
+    return finalDamage;
 }
 
 bool Entity::useStamina(int cost) {
@@ -120,20 +166,23 @@ bool Entity::useStamina(int cost) {
     else { std::cout << name << " doesn't have enough stamina for that!\n"; return false; }
 }
 
-void Entity::checkPhaseTransition() {
-    if (!isBoss || extraPhases.empty()) return; 
+bool Entity::checkPhaseTransition() {
+    if (!isBoss || extraPhases.empty()) return false; 
     if (currentHP <= extraPhases[0].thresholdHP) { 
         std::cout << "\n=======================================================\n";
         std::cout << extraPhases[0].transitionText << "\n";
         std::cout << "=======================================================\n\n";
         baseAttack = extraPhases[0].newAttack; baseDefense = extraPhases[0].newDefense; baseSpeed = extraPhases[0].newSpeed;
-        baseBIQ = extraPhases[0].newBIQ; baseSIQ = extraPhases[0].newSIQ; maxStamina = baseSIQ + 50; 
+        baseBIQ = extraPhases[0].newBIQ; baseSIQ = extraPhases[0].newSIQ; maxStamina = baseSIQ * 2; 
         
         naturalAbility = extraPhases[0].newNaturalAbility; passiveAbilities = extraPhases[0].newPassiveAbilities; 
         activeAbilities = extraPhases[0].newActiveAbilities; combatMenu = extraPhases[0].newCombatMenu;
         currentPhase++; extraPhases.erase(extraPhases.begin());                     
         calculateActiveStats(); 
+        
+        return true; // <--- NEW: Tells the engine a phase shift occurred
     }
+    return false;
 }
 
 bool Entity::executeTeamUp(Entity& partner, int staminaCost) {
@@ -213,10 +262,22 @@ void Entity::toggleStance() {
     isAltStance = !isAltStance; combatMenu.swap(altCombatMenu); 
     if (naturalAbility == PassiveID::ScrewDat) {
         if (isAltStance) {
-            baseBIQ = 90; baseSIQ = 0; screwDatDecayTimer = 0; 
-            std::cout << name << " shifted into STRIKE STANCE! (BIQ increased, SIQ plummeted to 0. Ultimate decay paused!)\n";
+            // He shifts to Strike Stance
+            baseBIQ = baseSIQ;   // <--- BIQ perfectly matches current SIQ
+            baseSIQ = 0;         // <--- SIQ drops to 0
+            screwDatDecayTimer = 0; 
+            std::cout << name << " shifted into STRIKE STANCE! (BIQ increased to match SIQ, SIQ plummeted to 0. Ultimate decay paused!)\n";
         } else {
-            baseBIQ = 60; baseSIQ = 100;
+            // He shifts to Support Stance
+            baseSIQ = maxStamina / 2; // <--- Perfectly restores SIQ because maxStamina never changes during the fight
+            
+            // Recalculate true baseBIQ so leveling isn't destroyed
+            if (internalID == EntityID::YoungBrian) {
+                baseBIQ = 15 + ((level - 1) * 2);
+            } else {
+                baseBIQ = 120; // Fallback for Adult Brian
+            }
+            
             if (screwDatStacks > 0) { screwDatDecayTimer = 2; std::cout << name << " shifted into SUPPORT STANCE! (Ultimate stacks will decay in 2 rounds!)\n"; }
             else std::cout << name << " shifted into SUPPORT STANCE! BIQ and SIQ Stats returned to normal.\n";
         }
@@ -229,7 +290,7 @@ void Entity::toggleStance() {
 }
 
 void Entity::regenerateStamina() {
-    int regenAmount = 10 + (currentSIQ / 5);          
+    int regenAmount = (currentSIQ / 4);          
     for (auto& s : activeStatuses) {
         if (s.type == StatusType::StaminaPenalty) regenAmount = regenAmount * (100 - s.value) / 100; 
     }
@@ -251,12 +312,15 @@ void Entity::gainEXP(int expAmount) {
 }
 
 void Entity::levelUp() {
-    level++; expToNextLevel = expToNextLevel * 1.5; 
+    level++; expToNextLevel = expToNextLevel * 1.5;
     
     // Type-safe checking!
     if (internalID == EntityID::YoungBrian) { maxHP += 15; baseAttack += 4; baseDefense += 4; baseSpeed += 2; baseBIQ += 2; baseSIQ += 2; }
     else if (internalID == EntityID::YoungPaul) { maxHP += 10; baseAttack += 5; baseDefense += 2; baseSpeed += 3; baseBIQ += 2; baseSIQ += 1; }
     else if (internalID == EntityID::YoungVince) { maxHP += 20; baseAttack += 3; baseDefense += 5; baseSpeed += 1; baseBIQ += 1; baseSIQ += 1; }
+    
+    // --- NEW: Recalculate max stamina based on the newly upgraded SIQ ---
+    maxStamina = baseSIQ * 2;
     
     currentHP = maxHP; currentStamina = maxStamina;
     std::cout << ">>> " << name << " grew to Level " << level << "! <<<\n";

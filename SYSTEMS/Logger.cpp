@@ -5,8 +5,8 @@ namespace GameLog {
 
     void Add(std::string message) {
         messages.push_back(message);
-        if (messages.size() > 12) { 
-            messages.erase(messages.begin()); // Delete oldest message
+        if (messages.size() > 100) { // <--- Increased from 12 to 100
+            messages.erase(messages.begin()); 
         }
     }
 

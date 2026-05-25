@@ -64,13 +64,24 @@ struct StatusEffect {
 std::string getStatusName(StatusID id);
 
 enum class MoveID {
-    None, Strike, TakeCover, SupportStrike, ClumsySwing,
-    PaulBasic, OneTwoPunch, BobAndWeave, KnifeSlash, Haymaker,
+    // Universal
+    None, Guard,
+    // Enemies
+    ClumsySwing, Strike,
+    // Brian Young 
+    StepOff, FaintPunches,
+    // Brian
     BrianStrikeBasic, BrianStrikeSkill, BrianStrikeUlt,
     BrianSupportBasic, BrianSupportSkill, BrianSupportUlt,
+    // Paul
+    PaulBasic, OneTwoPunch, BobAndWeave, KnifeSlash, Haymaker,
+    // Vince
     VinceBasic, Shove, MiniSledge, Sledgehammer, HoldTheLine,
+    // Tony
     TonyP1Basic, PrecisionStrike, OlderBrother,
     TonyP2Basic, Clutch, LightsOut,
+
+    SupportStrike,
     AllOutAttack, BrothersInArms, HeavyHitters,
     Unknown
 };
@@ -93,6 +104,11 @@ struct PhaseData {
     std::vector<PassiveID> newPassiveAbilities; 
     std::vector<ActiveID> newActiveAbilities;
     std::vector<Move> newCombatMenu;
+};
+
+struct StatusPopup {
+    std::string text;
+    bool isBuff;
 };
 
 class Entity {
@@ -142,7 +158,7 @@ public:
     void removeStatusByType(StatusType type);
     
     Entity(std::string spawnName, LifeStage spawnStage, bool spawnIsBoss); 
-    void takeDamage(int rawDamage, bool isCritical);         
+    int takeDamage(int rawDamage, bool isCritical);         
     void healHP(int amount);                                 
     void endOfTurnUpdate();                                  
     void regenerateStamina();                                
@@ -153,6 +169,7 @@ public:
     bool executeTeamUp(Entity& partner1, Entity& partner2, int staminaCost);        
     void calculateActiveStats();                             
     void checkBadges();     
-    void checkPhaseTransition();                             
+    std::vector<StatusPopup> pendingPopups; // <--- NEW: Stores text to animate
+    bool checkPhaseTransition();            // <--- CHANGED: From void to bool                           
     void resetStats();                                   
 };

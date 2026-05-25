@@ -132,7 +132,7 @@ void triggerPassives(Entity& activeCharacter) {
     if (activeCharacter.naturalAbility == PassiveID::ScrewDat) {
         if (activeCharacter.isAltStance) {
             activeCharacter.screwDatStacks += 2; 
-            int atkBonus = activeCharacter.baseAttack * 0.05; int biqBonus = activeCharacter.baseBIQ * 0.05;
+            int atkBonus = std::max(1.0, activeCharacter.baseAttack * 0.05); int biqBonus = std::max(1.0, activeCharacter.baseBIQ * 0.05);
             activeCharacter.addStatus({StatusID::DemolitionistATK, StatusType::StatModifier, StatName::ATK, atkBonus, 99, true});
             activeCharacter.addStatus({StatusID::DemolitionistBIQ, StatusType::StatModifier, StatName::BIQ, biqBonus, 99, true});
             std::cout << "[PASSIVE] Screw Dat: " << activeCharacter.name << "'s Attack & BIQ permanently rise by 5%!\n";

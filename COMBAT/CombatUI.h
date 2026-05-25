@@ -10,6 +10,8 @@ void AnimateReturn(Entity* attacker, std::vector<Entity*>& pTeam, std::vector<En
 void AnimateHit(Entity* target, int damage, bool isCrit, bool isDodge, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum, int durationFrames);
 void AnimateDeath(Entity* target, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum);
 void AnimateSupport(Entity* caster, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum);
+void AnimatePopupsForEntity(Entity* target, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum);
+void AnimatePhaseTransition(int phaseNum, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum);
 // --------------------------------
 
 void pauseForPlayer(bool wasPlayerTurn, std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, int momentum);

@@ -1,11 +1,15 @@
 #include "CombatUI.h" 
 #include "CombatEngine.h" 
 #include "AbilityDatabase.h"
-#include "MoveDatabase.h" // Added to access getCategoryName()
+#include "MoveDatabase.h" 
 #include "../Systems/Logger.h" 
 #include "raylib.h" 
 #include <string> 
 #include <algorithm>
+#include <map> // <--- Ensure this is here!
+
+// <--- Add the extern promise here!
+extern std::map<ActorID, Texture2D> globalSprites; 
 
 // --- ANIMATION TRACKERS ---
 Entity* animAttacker = nullptr;
@@ -16,9 +20,17 @@ Entity* animDying = nullptr;
 int deathFadeAlpha = 255;        
 
 Vector2 GetBasePos(Entity* e, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam) {
-    int pX = 200; for (Entity* p : pTeam) { if (p->isAlive || p == animDying || p == animTarget) { if (p == e) return {(float)pX, 300.0f}; pX += 250; } }
-    int eX = 1600; for (Entity* en : eTeam) { if (en->isAlive || en == animDying || en == animTarget) { if (en == e) return {(float)eX, 300.0f}; eX -= 250; } }
-    return {0, 0}; 
+    // Shifted down to Y = 100 to leave room for Damage Popups!
+    Vector2 pPos[3] = { {200, 100}, {350, 240}, {200, 380} };
+    Vector2 ePos[3] = { {1600, 100}, {1450, 240}, {1600, 380} };
+    
+    for (int i = 0; i < pTeam.size(); i++) {
+        if (pTeam[i] == e) return pPos[i];
+    }
+    for (int i = 0; i < eTeam.size(); i++) {
+        if (eTeam[i] == e) return ePos[i];
+    }
+    return {0, 0};
 }
 
 static std::string getTargetText(MoveTarget t) {
@@ -72,68 +84,184 @@ bool DrawGUIButton(Rectangle rect, const char* text, int hotkey, bool disabled =
 }
 
 void DrawBattleOverlay(std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, int momentum) {
-    DrawRectangle(0, 0, 1920, 600, DARKGRAY);
-    DrawText("MOMENTUM:", 860, 20, 25, YELLOW); DrawRectangle(860, 50, 200, 10, BLACK); DrawRectangle(860, 50, momentum * 2, 10, YELLOW);
-    
-    int pX = 200;
-    for (Entity* p : playerTeam) {
-        if (!p->isAlive && p != animDying && p != animTarget) continue; 
-        Color hpColor = (p->currentHP > 0) ? GREEN : RED; 
-        Color bodyColor = BLUE; Color textColor = WHITE; Color barBgColor = BLACK;
+    // 1. Draw Main UI Backgrounds
+    DrawRectangle(0, 600, 1920, 480, DARKGRAY);
+    DrawRectangleLines(0, 600, 1920, 480, WHITE);
+
+    // Momentum Bar (Moved to Top Center of UI)
+    DrawText("MOMENTUM:", 700, 615, 25, YELLOW);
+    DrawRectangle(860, 620, 200, 15, BLACK);
+    DrawRectangle(860, 620, momentum * 2, 15, YELLOW);
+
+    // 2. Draw Player UI Profiles (Left Side)
+    int uiY = 650;
+    for (int i = 0; i < playerTeam.size(); i++) {
+        Entity* p = playerTeam[i];
+        if (!p) continue;
         
-        if (p == animDying) { 
-            float a = deathFadeAlpha / 255.0f;
-            hpColor = Fade(hpColor, a); bodyColor = Fade(bodyColor, a);
-            textColor = Fade(textColor, a); barBgColor = Fade(barBgColor, a);
+        // Profile Picture
+        Rectangle profileRect = { 50, (float)uiY, 80, 80 };
+        if (globalSprites.count(p->actorID)) {
+            // Source cuts the 7x15 texture exactly in half to grab the top 7 pixels (Face/Shoulders)
+            Rectangle sourceCrop = {0, 0, 7, 7}; 
+            DrawTexturePro(globalSprites[p->actorID], sourceCrop, profileRect, {0,0}, 0.0f, p->isAlive ? WHITE : DARKGRAY);
+            DrawRectangleLinesEx(profileRect, 2, WHITE);
+        } else {
+            // Fallback for characters without sprites
+            DrawRectangleRec(profileRect, p->isAlive ? BLUE : DARKGRAY);
+            DrawRectangleLinesEx(profileRect, 2, WHITE);
+            DrawText(p->name.substr(0, 3).c_str(), 65, uiY + 30, 20, WHITE); 
         }
-        float drawX = pX; float drawY = 300;
-        if (p == animAttacker) { drawX = animAttackerPos.x; drawY = animAttackerPos.y; }
-        if (p == animTarget) { drawX += animTargetOffset.x; drawY += animTargetOffset.y; }
-        DrawRectangle(drawX, drawY, 100, 200, bodyColor); 
-        DrawText(TextFormat("%s [Lv %d]", p->name.c_str(), p->level), drawX - 20, drawY - 60, 25, textColor);
         
-        if (p->shieldHP > 0) {
-            int shieldWidth = (p->shieldHP * 140) / p->maxHP;
-            if (shieldWidth > 140) shieldWidth = 140; 
-            DrawRectangle(drawX - 20, drawY - 45, 140, 10, barBgColor);
-            DrawRectangle(drawX - 20, drawY - 45, shieldWidth, 10, SKYBLUE);
+        if (!p->isAlive) {
+            DrawText("KNOCKED OUT", 150, uiY + 30, 20, RED);
+            uiY += 120;
+            continue;
         }
 
-        DrawRectangle(drawX - 20, drawY - 30, 140, 20, barBgColor); DrawRectangle(drawX - 20, drawY - 30, (p->currentHP * 140) / p->maxHP, 20, hpColor);
-        DrawText(TextFormat("%d / %d", p->currentHP, p->maxHP), drawX - 20, drawY + 210, 20, textColor); 
-        DrawText(TextFormat("STAM: %d", p->currentStamina), drawX - 20, drawY + 240, 20, Fade(LIGHTGRAY, textColor.a/255.0f));
-        pX += 250;
+        // Name & Level
+        DrawText(TextFormat("%s [Lv %d]", p->name.c_str(), p->level), 150, uiY, 20, WHITE);
+
+        // HP Text & Stacked Bar
+        int displayHP = p->currentHP + p->shieldHP;
+        DrawText(TextFormat("HP: %d / %d", displayHP, p->maxHP), 150, uiY + 25, 18, GREEN);
+        
+        DrawRectangle(150, uiY + 45, 200, 15, BLACK);
+        float hpPercent = (float)p->currentHP / p->maxHP;
+        if (hpPercent > 1.0f) hpPercent = 1.0f;
+        DrawRectangle(150, uiY + 45, hpPercent * 200, 15, GREEN);
+        
+        // Add Blue Shield to the Bar
+        if (p->shieldHP > 0) {
+            float shieldPercent = (float)p->shieldHP / p->maxHP;
+            if (hpPercent + shieldPercent > 1.0f) shieldPercent = 1.0f - hpPercent;
+            DrawRectangle(150 + (hpPercent * 200), uiY + 45, shieldPercent * 200, 15, SKYBLUE);
+        }
+
+        // Stamina Text & Bar
+        DrawText(TextFormat("STM: %d / %d", p->currentStamina, p->maxStamina), 150, uiY + 65, 18, YELLOW);
+        DrawRectangle(150, uiY + 85, 200, 15, BLACK);
+        float stamPercent = (float)p->currentStamina / p->maxStamina;
+        DrawRectangle(150, uiY + 85, stamPercent * 200, 15, YELLOW);
+
+        // Status Icons (Text Placeholders)
+        int statX = 370;
+        int statY = uiY + 20;
+        for (auto& s : p->activeStatuses) {
+            std::string statStr = "UP"; Color statCol = GREEN;
+            if (s.value < 0) { statStr = "DOWN"; statCol = RED; } // <--- Changed from DN to DOWN
+            
+            std::string label = "";
+            if (s.type == StatusType::StatModifier) {
+                if (s.targetStat == StatName::ATK) label = "ATK " + statStr;
+                if (s.targetStat == StatName::DEF) label = "DEF " + statStr;
+                if (s.targetStat == StatName::SPD) label = "SPD " + statStr;
+                if (s.targetStat == StatName::BIQ) label = "BIQ " + statStr;
+                if (s.targetStat == StatName::SIQ) label = "SIQ " + statStr;
+            } else if (s.type == StatusType::Bleed) label = "BLEED";
+            else if (s.type == StatusType::Stun) label = "STUN";
+            else if (s.type == StatusType::Taunt) label = "TAUNT";
+
+            if (label != "") {
+                DrawText(label.c_str(), statX, statY, 15, statCol);
+                statY += 20;
+                if (statY > uiY + 80) { statY = uiY + 20; statX += 60; }
+            }
+        }
+        uiY += 120;
+    }
+
+    // 3. Scrollable Combat Log (Right Side)
+    static int combatLogScrollY = 0;
+    Rectangle logRec = { 1300, 600, 620, 480 };
+    DrawRectangleRec(logRec, Fade(BLACK, 0.5f));
+    DrawRectangleLinesEx(logRec, 2, WHITE);
+    DrawText("COMBAT LOG", 1320, 620, 25, LIGHTGRAY);
+    
+    // Scrolling logic
+    if (CheckCollisionPointRec(GetMousePosition(), logRec)) {
+        combatLogScrollY += GetMouseWheelMove() * 30;
+        if (combatLogScrollY > 0) combatLogScrollY = 0;
+    }
+
+    BeginScissorMode(1300, 660, 620, 410);
+    std::vector<std::string> logs = GameLog::GetMessages(); 
+    int logY = 670 + combatLogScrollY;
+    for (std::string& msg : logs) { 
+        DrawText(msg.c_str(), 1320, logY, 20, WHITE); 
+        logY += 30; 
+    }
+    EndScissorMode();
+
+    // 4. Draw Sprites in V-Formation
+    for (Entity* p : playerTeam) {
+        if (!p->isAlive && p != animDying && p != animTarget) continue;
+        
+        Color tint = WHITE; Color textColor = WHITE;
+        if (p == animDying) { 
+            float a = deathFadeAlpha / 255.0f;
+            tint = Fade(WHITE, a); textColor = Fade(textColor, a); 
+        }
+        
+        Vector2 drawPos = GetBasePos(p, playerTeam, enemyTeam);
+        if (p == animAttacker) drawPos = animAttackerPos;
+        if (p == animTarget) { drawPos.x += animTargetOffset.x; drawPos.y += animTargetOffset.y; }
+        
+        // NEW SIZE: 70x150
+        Rectangle destRect = {drawPos.x, drawPos.y, 70, 150};
+        if (globalSprites.count(p->actorID)) {
+            Rectangle fullSource = {0, 0, 7, 15};
+            DrawTexturePro(globalSprites[p->actorID], fullSource, destRect, {0,0}, 0.0f, tint);
+        } else {
+            DrawRectangle(destRect.x, destRect.y, destRect.width, destRect.height, BLUE); 
+        }
+        
+        // X shifted to -10 to center the name over the thinner 70px sprite
+        DrawText(p->name.c_str(), drawPos.x - 10, drawPos.y - 30, 25, textColor);
     }
     
-    int eX = 1600;
     for (Entity* e : enemyTeam) {
-        if (!e->isAlive && e != animDying && e != animTarget) continue; 
+        if (!e->isAlive && e != animDying && e != animTarget) continue;
+        
         Color hpColor = RED; Color bodyColor = RED; Color textColor = WHITE; Color barBgColor = BLACK;
+        Color tint = WHITE; // <--- ADDED THIS HERE!
+        
         if (e == animDying) { 
             float a = deathFadeAlpha / 255.0f;
             hpColor = Fade(hpColor, a); bodyColor = Fade(bodyColor, a);
             textColor = Fade(textColor, a); barBgColor = Fade(barBgColor, a);
+            tint = Fade(WHITE, a); // <--- FADES THE SPRITE WHEN DYING
         }
-        float drawX = eX; float drawY = 300;
-        if (e == animAttacker) { drawX = animAttackerPos.x; drawY = animAttackerPos.y; }
-        if (e == animTarget) { drawX += animTargetOffset.x; drawY += animTargetOffset.y; }
-        DrawRectangle(drawX, drawY, 100, 200, bodyColor); 
-        DrawText(e->name.c_str(), drawX - 20, drawY - 60, 25, textColor);
         
+        Vector2 drawPos = GetBasePos(e, playerTeam, enemyTeam);
+        if (e == animAttacker) drawPos = animAttackerPos;
+        if (e == animTarget) { drawPos.x += animTargetOffset.x; drawPos.y += animTargetOffset.y; }
+        
+        // NEW SIZE: 70x150
+        Rectangle destRect = {drawPos.x, drawPos.y, 70, 150};
+        if (globalSprites.count(e->actorID)) {
+            Rectangle fullSource = {0, 0, 7, 15};
+            DrawTexturePro(globalSprites[e->actorID], fullSource, destRect, {0,0}, 0.0f, tint); // Now it knows what tint is!
+        } else {
+            DrawRectangle(destRect.x, destRect.y, destRect.width, destRect.height, bodyColor); 
+        }
+        
+        // X shifted to -10 to center the name over the thinner 70px sprite
+        DrawText(e->name.c_str(), drawPos.x - 10, drawPos.y - 30, 25, textColor);
+        
+        // Enemy HP and Shield Bars centered under the 70px sprite
         if (e->shieldHP > 0) {
             int shieldWidth = (e->shieldHP * 140) / e->maxHP;
             if (shieldWidth > 140) shieldWidth = 140; 
-            DrawRectangle(drawX - 20, drawY - 45, 140, 10, barBgColor);
-            DrawRectangle(drawX - 20, drawY - 45, shieldWidth, 10, SKYBLUE);
+            DrawRectangle(drawPos.x - 35, drawPos.y + 155, 140, 10, barBgColor);
+            DrawRectangle(drawPos.x - 35, drawPos.y + 155, shieldWidth, 10, SKYBLUE);
         }
-
-        DrawRectangle(drawX - 20, drawY - 30, 140, 20, barBgColor); DrawRectangle(drawX - 20, drawY - 30, (e->currentHP * 140) / e->maxHP, 20, hpColor);
-        DrawText(TextFormat("%d / %d", e->currentHP, e->maxHP), drawX - 20, drawY + 210, 20, textColor);
-        eX -= 250;
+        
+        // HP Bar and Fraction Text centered under the 70px sprite
+        DrawRectangle(drawPos.x - 35, drawPos.y + 165, 140, 15, barBgColor); 
+        DrawRectangle(drawPos.x - 35, drawPos.y + 165, (e->currentHP * 140) / e->maxHP, 15, hpColor);
+        DrawText(TextFormat("%d / %d", e->currentHP, e->maxHP), drawPos.x - 35, drawPos.y + 185, 20, textColor);
     }
-    DrawRectangle(960, 600, 960, 480, Fade(BLACK, 0.8f)); DrawRectangleLines(960, 600, 960, 480, DARKGRAY);
-    std::vector<std::string> logs = GameLog::GetMessages(); int logY = 620;
-    for (std::string& msg : logs) { DrawText(msg.c_str(), 980, logY, 20, LIGHTGRAY); logY += 30; }
 }
 
 void AnimateApproach(Entity* attacker, Entity* target, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum) {
@@ -149,7 +277,7 @@ void AnimateApproach(Entity* attacker, Entity* target, std::vector<Entity*>& pTe
         float t = i / 10.0f;
         animAttackerPos.x = start.x + (end.x - start.x) * t;
         animAttackerPos.y = start.y + (end.y - start.y) * t;
-        BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
     }
 }
 
@@ -160,7 +288,7 @@ void AnimateReturn(Entity* attacker, std::vector<Entity*>& pTeam, std::vector<En
         float t = i / 10.0f;
         animAttackerPos.x = start.x + (end.x - start.x) * t;
         animAttackerPos.y = start.y + (end.y - start.y) * t;
-        BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
     }
     animAttacker = nullptr;
 }
@@ -182,7 +310,7 @@ void AnimateHit(Entity* target, int damage, bool isCrit, bool isDodge, std::vect
         } else {
             animTargetOffset = {0,0}; 
         }
-        BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(pTeam, eTeam, momentum);
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum);
         int slideUp = (i < 20) ? (i*2) : 40;
         DrawText(popupText.c_str(), baseT.x + 20, baseT.y - 40 - slideUp, isCrit? 40 : 30, popColor);
         EndDrawing();
@@ -194,7 +322,7 @@ void AnimateDeath(Entity* target, std::vector<Entity*>& pTeam, std::vector<Entit
     animDying = target;
     for (int i = 255; i >= 0; i -= 8) { 
         deathFadeAlpha = i;
-        BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
     }
     animDying = nullptr;
     deathFadeAlpha = 255; 
@@ -206,16 +334,75 @@ void AnimateSupport(Entity* caster, std::vector<Entity*>& pTeam, std::vector<Ent
     for (int i=0; i<20; i++) { 
         animAttackerPos = base;
         animAttackerPos.y -= (i < 10) ? i*2 : (20-i)*2; 
-        BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
     }
     animAttacker = nullptr;
+}
+
+void AnimatePopupsForEntity(Entity* target, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum) {
+    if (target->pendingPopups.empty()) return;
+
+    bool isPlayer = false;
+    for (auto* p : pTeam) if (p == target) isPlayer = true;
+
+    Vector2 baseT = GetBasePos(target, pTeam, eTeam);
+
+    for (auto& popup : target->pendingPopups) {
+        float offsetX = popup.isBuff ? (isPlayer ? 110 : -60) : (isPlayer ? -60 : 110);              
+        Color pCol = popup.isBuff ? GREEN : RED; 
+
+        // Increased from 30 to 60 frames!
+        for (int i=0; i<30; i++) {
+            BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum);
+
+            int slideUp = i; // Rises slower
+            float alpha = 1.0f;
+            if (i > 40) alpha = 1.0f - ((i - 40) / 20.0f); // Fades out smoothly at the very end
+
+            DrawText(popup.text.c_str(), baseT.x + offsetX, baseT.y + 60 - slideUp, 20, Fade(pCol, alpha));
+
+            EndDrawing();
+        }
+    }
+    target->pendingPopups.clear();
+}
+
+void AnimatePhaseTransition(int phaseNum, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum) {
+    for(int i = 0; i < 20; i++) {
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
+    }
+    double entryTime = GetTime();
+    while (!WindowShouldClose()) {
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum);
+
+        DrawRectangle(0, 0, 1920, 1080, Fade(BLACK, 0.7f));
+        std::string text = "PHASE " + std::to_string(phaseNum);
+        DrawText(text.c_str(), 1920/2 - MeasureText(text.c_str(), 100)/2, 400, 100, RED);
+        DrawText("[ CLICK MOUSE OR PRESS ENTER TO CONTINUE ]", 1920/2 - MeasureText("[ CLICK MOUSE OR PRESS ENTER TO CONTINUE ]", 30)/2, 600, 30, LIGHTGRAY);
+
+        EndDrawing();
+        if (GetTime() - entryTime > 0.5) {
+            if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) || IsKeyReleased(KEY_ENTER)) break;
+        }
+    }
+    double exitTime = GetTime();
+    while (GetTime() - exitTime < 0.2 && !WindowShouldClose()) {
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
+    }
 }
 
 void pauseForPlayer(bool wasPlayerTurn, std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, int momentum) {
     double entryTime = GetTime(); 
     while (!WindowShouldClose()) {
-        BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(playerTeam, enemyTeam, momentum);
-        DrawRectangle(0, 600, 960, 480, Fade(BLACK, 0.8f)); DrawText("[ CLICK MOUSE OR PRESS ENTER TO CONTINUE ]", 100, 800, 30, YELLOW);
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, momentum);
+        
+        // Match the center console dimensions exactly
+        DrawRectangle(550, 650, 700, 400, Fade(DARKPURPLE, 0.6f)); 
+        DrawRectangleLines(550, 650, 700, 400, PURPLE);
+        
+        // Centered prompt
+        DrawText("[ CLICK MOUSE OR PRESS ENTER TO CONTINUE ]", 580, 830, 25, YELLOW);
+        
         EndDrawing();
         if (GetTime() - entryTime > 0.25) {
             if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) || IsKeyReleased(KEY_ENTER)) break;
@@ -223,7 +410,7 @@ void pauseForPlayer(bool wasPlayerTurn, std::vector<Entity*>& playerTeam, std::v
     }
     double exitTime = GetTime();
     while (GetTime() - exitTime < 0.2 && !WindowShouldClose()) {
-        BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(playerTeam, enemyTeam, momentum); EndDrawing();
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, momentum); EndDrawing();
     }
 }
 
@@ -243,19 +430,21 @@ std::vector<Entity*> requestPlayerTargets(Entity* attacker, Move selectedMove, s
     int targetsNeeded = (selectedMove.target == MoveTarget::TwoEnemies || selectedMove.target == MoveTarget::TwoAllies) ? 2 : 1;
     std::vector<Entity*>& validPool = targetsEnemies ? enemyTeam : playerTeam;
     int aliveCount = 0; for (Entity* t : validPool) if (t->isAlive) aliveCount++;
-    if (targetsNeeded > aliveCount) targetsNeeded = aliveCount; if (targetsNeeded == 0) return selectedTargets; 
+    if (targetsNeeded > aliveCount) targetsNeeded = aliveCount; if (targetsNeeded == 0) return selectedTargets;
     
     while (selectedTargets.size() < targetsNeeded && !WindowShouldClose()) {
-        BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(playerTeam, enemyTeam, 0);
-        DrawRectangle(0, 600, 960, 480, Fade(DARKPURPLE, 0.6f)); DrawRectangleLines(0, 600, 960, 480, PURPLE);
-        DrawText(TextFormat("SELECT TARGET(S) FOR: %s (%d needed)", selectedMove.name.c_str(), targetsNeeded - selectedTargets.size()), 50, 630, 30, WHITE);
-        DrawText("[ HOVER OVER A TARGET AND CLICK, OR PRESS 'B' TO CANCEL ]", 50, 700, 20, LIGHTGRAY); 
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, 0);
         
-        int pX = 200; int eX = 1600;
+        DrawRectangle(500, 600, 800, 480, Fade(DARKPURPLE, 0.6f)); DrawRectangleLines(500, 600, 800, 480, PURPLE);
+        DrawText(TextFormat("SELECT TARGET(S) FOR: %s (%d needed)", selectedMove.name.c_str(), targetsNeeded - selectedTargets.size()), 530, 630, 30, WHITE);
+        DrawText("[ HOVER OVER A TARGET AND CLICK, OR PRESS 'B' TO CANCEL ]", 530, 700, 20, LIGHTGRAY);
+        
         for (Entity* e : validPool) {
             if (e->isAlive) {
-                Rectangle targetBox;
-                if (targetsEnemies) { targetBox = { (float)eX - 20, 240, 140, 260 }; eX -= 250; } else { targetBox = { (float)pX - 20, 240, 140, 260 }; pX += 250; }
+                Vector2 pos = GetBasePos(e, playerTeam, enemyTeam);
+                // Shrunk to wrap tightly around the 70x150 sprite
+                Rectangle targetBox = { pos.x - 20, pos.y - 20, 110, 200 };
+                
                 bool alreadySelected = (std::find(selectedTargets.begin(), selectedTargets.end(), e) != selectedTargets.end());
                 if (alreadySelected) { DrawRectangleLinesEx(targetBox, 3, GREEN); DrawText("SELECTED", targetBox.x, targetBox.y - 30, 20, GREEN); } 
                 else {
@@ -282,92 +471,115 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
     
     while (!turnComplete && battleIsActive && !WindowShouldClose()) {
         Move selectedMove; bool moveSelected = false;
-        BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(playerTeam, enemyTeam, teamMomentum);
-        DrawRectangle(0, 600, 960, 480, Fade(DARKBLUE, 0.5f)); DrawRectangleLines(0, 600, 960, 480, WHITE);
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, teamMomentum);
         
-        DrawText(TextFormat("WHAT WILL %s DO?", character->name.c_str()), 50, 620, 40, WHITE);
-        DrawText("[ Right-Click any Attack, or Right-Click a Character's HP Bar to Inspect! ]", 50, 665, 18, LIGHTGRAY);
+        DrawRectangle(550, 650, 700, 400, Fade(DARKBLUE, 0.5f)); 
+        DrawRectangleLines(550, 650, 700, 400, WHITE);
+        
+        // 1. Only draw the main "WHAT WILL DO" text if we are NOT in a sub-menu
+        bool isMainMenu = (!inItemMenu && !inReviveMenu && !inTeamUpMenu && !inSwapMenu);
+        if (isMainMenu) {
+            DrawText(TextFormat("WHAT WILL %s DO?", character->name.c_str()), 580, 670, 30, WHITE);
+            DrawText("[ Right-Click a Sprite or Profile Picture to Inspect! ]", 580, 710, 18, LIGHTGRAY);
+        }
         
         if (!showDetailsPopup) {
-            int pX = 200; int eX = 1600;
-            for (Entity* p : playerTeam) {
-                if (!p->isAlive) continue; 
-                if (CheckCollisionPointRec(GetMousePosition(), {(float)pX - 20, 240, 140, 260}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
-                pX += 250;
-            }
+            // Check Enemy Sprite Clicks
             for (Entity* e : enemyTeam) {
                 if (!e->isAlive) continue; 
-                if (CheckCollisionPointRec(GetMousePosition(), {(float)eX - 20, 240, 140, 260}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = e; detailsType = 5; showDetailsPopup = true; }
-                eX -= 250;
+                Vector2 pos = GetBasePos(e, playerTeam, enemyTeam);
+                // Updated Hitbox
+                if (CheckCollisionPointRec(GetMousePosition(), {pos.x - 20, pos.y - 20, 110, 200}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = e; detailsType = 5; showDetailsPopup = true; }
+            }
+            
+            // Check Player Sprite AND Profile Clicks
+            for (int i = 0; i < playerTeam.size(); i++) {
+                Entity* p = playerTeam[i];
+                if (!p->isAlive) continue; 
+                Vector2 pos = GetBasePos(p, playerTeam, enemyTeam);
+                
+                // Updated Hitbox
+                if (CheckCollisionPointRec(GetMousePosition(), {pos.x - 20, pos.y - 20, 110, 200}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
+                
+                // Profile Picture Click (DO NOT CHANGE)
+                if (CheckCollisionPointRec(GetMousePosition(), {50, 650.0f + (i * 120), 80, 80}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
             }
         }
         
-        if (!inItemMenu && !inReviveMenu && !inTeamUpMenu && !inSwapMenu) {
-            int startX = 50; int startY = 700; int buttonKeys[4] = {KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR};
+        if (isMainMenu) {
+            int startX = 580; int startY = 750; int buttonKeys[4] = {KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR};
             for (int i = 0; i < character->combatMenu.size(); i++) {
-                Rectangle btn = { (float)startX, (float)startY + (i * 60), 400, 45 };
+                Rectangle btn = { (float)startX, (float)startY + (i * 50), 300, 40 };
                 if (DrawGUIButton(btn, (std::to_string(i+1) + ". " + character->combatMenu[i].name + " [" + std::to_string(character->combatMenu[i].staminaCost) + "]").c_str(), buttonKeys[i], showDetailsPopup)) {
                     if (character->currentStamina >= character->combatMenu[i].staminaCost) { selectedMove = character->combatMenu[i]; moveSelected = true; } else GameLog::Add("[!] Not enough stamina!");
                 }
                 if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON) && !showDetailsPopup) { detailedMove = character->combatMenu[i]; detailsType = 1; showDetailsPopup = true; }
             }
-            if (DrawGUIButton({480, 700, 250, 45}, "5. Backpack", KEY_FIVE, showDetailsPopup)) inItemMenu = true;
-            if (DrawGUIButton({480, 760, 250, 45}, "6. Team-Up", KEY_SIX, showDetailsPopup)) inTeamUpMenu = true;
-            if (canFlee && DrawGUIButton({480, 820, 250, 45}, "7. Retreat", KEY_SEVEN, showDetailsPopup)) { GameLog::Add(">>> FELL BACK TO HIDEOUT <<<"); battleIsActive = false; turnComplete = true; }
+            
+            if (DrawGUIButton({900, 750, 250, 40}, "5. Backpack", KEY_FIVE, showDetailsPopup)) inItemMenu = true;
+            if (DrawGUIButton({900, 800, 250, 40}, "6. Team-Up", KEY_SIX, showDetailsPopup)) inTeamUpMenu = true;
+            if (canFlee && DrawGUIButton({900, 850, 250, 40}, "7. Retreat", KEY_SEVEN, showDetailsPopup)) { GameLog::Add(">>> FELL BACK TO HIDEOUT <<<"); battleIsActive = false; turnComplete = true; }
             
             int nextBtnNum = 8;
             if (!character->altCombatMenu.empty()) {
-                if (DrawGUIButton({480, 880, 250, 45}, TextFormat("%d. Stance (%s)", nextBtnNum, character->isAltStance ? "Strike" : "Support"), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) { 
+                if (DrawGUIButton({900, 900, 250, 40}, TextFormat("%d. Stance (%s)", nextBtnNum, character->isAltStance ? "Strike" : "Support"), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) { 
                     character->toggleStance(); GameLog::Add(character->name + " shifted their combat stance!"); 
                 }
                 nextBtnNum++;
             }
             
-            // --- NEW: CREW SWAP BUTTON ---
-            if (DrawGUIButton({740, 700, 200, 45}, TextFormat("%d. Swap Crew", nextBtnNum), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) {
+            if (DrawGUIButton({900, 950, 250, 40}, TextFormat("%d. Swap Crew", nextBtnNum), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) {
                 inSwapMenu = true;
             }
         } 
         else if (inItemMenu && !inReviveMenu) {
-            DrawText("BACKPACK:", 50, 700, 30, LIGHTGRAY); bool usedItem = false;
-            if (DrawGUIButton({50, 740, 300, 45}, TextFormat("1. Bandage (x%d)", inventory[0]), KEY_ONE, showDetailsPopup)) { if (inventory[0] > 0) { inventory[0]--; character->currentHP += (character->maxHP * 0.3); if (character->currentHP > character->maxHP) character->currentHP = character->maxHP; GameLog::Add(character->name + " used a Bandage!"); usedItem = true; } else GameLog::Add("Out of Bandages!"); }
-            if (DrawGUIButton({50, 800, 300, 45}, TextFormat("2. Energy Drink (x%d)", inventory[1]), KEY_TWO, showDetailsPopup)) { if (inventory[1] > 0) { inventory[1]--; character->currentStamina += 40; if (character->currentStamina > 200) character->currentStamina = 200; GameLog::Add(character->name + " drank an Energy Drink!"); usedItem = true; } else GameLog::Add("Out of Energy Drinks!"); }
-            if (DrawGUIButton({50, 860, 300, 45}, TextFormat("3. Revive (x%d)", inventory[2]), KEY_THREE, showDetailsPopup)) { if (inventory[2] > 0) { bool anyoneDead = false; for (Entity* p : playerTeam) if (!p->isAlive) anyoneDead = true; if (anyoneDead) { inItemMenu = false; inReviveMenu = true; } else GameLog::Add("Everyone is already alive!"); } else GameLog::Add("Out of Revives!"); }
-            if (DrawGUIButton({400, 740, 200, 45}, "4. Back [B]", KEY_FOUR, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) inItemMenu = false;
+            // Text Shifted up to 670 to match main menu
+            DrawText("BACKPACK:", 580, 670, 30, WHITE); 
+            DrawText("[ Select an item to use ]", 580, 710, 18, LIGHTGRAY);
+            bool usedItem = false;
+            
+            if (DrawGUIButton({580, 750, 300, 40}, TextFormat("1. Bandage (x%d)", inventory[0]), KEY_ONE, showDetailsPopup)) { if (inventory[0] > 0) { inventory[0]--; character->currentHP += (character->maxHP * 0.3); if (character->currentHP > character->maxHP) character->currentHP = character->maxHP; GameLog::Add(character->name + " used a Bandage!"); usedItem = true; } else GameLog::Add("Out of Bandages!"); }
+            if (DrawGUIButton({580, 800, 300, 40}, TextFormat("2. Energy Drink (x%d)", inventory[1]), KEY_TWO, showDetailsPopup)) { if (inventory[1] > 0) { inventory[1]--; character->currentStamina += 40; if (character->currentStamina > 200) character->currentStamina = 200; GameLog::Add(character->name + " drank an Energy Drink!"); usedItem = true; } else GameLog::Add("Out of Energy Drinks!"); }
+            if (DrawGUIButton({580, 850, 300, 40}, TextFormat("3. Revive (x%d)", inventory[2]), KEY_THREE, showDetailsPopup)) { if (inventory[2] > 0) { bool anyoneDead = false; for (Entity* p : playerTeam) if (!p->isAlive) anyoneDead = true; if (anyoneDead) { inItemMenu = false; inReviveMenu = true; } else GameLog::Add("Everyone is already alive!"); } else GameLog::Add("Out of Revives!"); }
+            
+            if (DrawGUIButton({900, 750, 200, 40}, "4. Back [B]", KEY_FOUR, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) inItemMenu = false;
+            
             if (usedItem) turnComplete = true; 
         }
         else if (inReviveMenu) {
-            DrawText("WHO TO REVIVE?", 50, 700, 30, LIGHTGRAY);
-            int startY = 740; int btnIndex = 0; int buttonKeys[3] = {KEY_ONE, KEY_TWO, KEY_THREE};
+            DrawText("WHO TO REVIVE?", 580, 670, 30, WHITE);
+            int startY = 750; int btnIndex = 0; int buttonKeys[3] = {KEY_ONE, KEY_TWO, KEY_THREE};
+            
             for (Entity* p : playerTeam) {
                 if (!p->isAlive) {
-                    if (DrawGUIButton({ 50.0f, (float)startY + (btnIndex * 60), 300.0f, 45.0f }, (std::to_string(btnIndex + 1) + ". " + p->name).c_str(), buttonKeys[btnIndex], showDetailsPopup)) { inventory[2]--; p->isAlive = true; p->currentHP = p->maxHP / 2; GameLog::Add(character->name + " used a Revive on " + p->name + "!"); turnComplete = true; break; }
+                    if (DrawGUIButton({ 580.0f, (float)startY + (btnIndex * 50), 300.0f, 40.0f }, (std::to_string(btnIndex + 1) + ". " + p->name).c_str(), buttonKeys[btnIndex], showDetailsPopup)) { inventory[2]--; p->isAlive = true; p->currentHP = p->maxHP / 2; GameLog::Add(character->name + " used a Revive on " + p->name + "!"); turnComplete = true; break; }
                     btnIndex++;
                 }
             }
-            if (DrawGUIButton({400, 740, 200, 45}, "4. Cancel [B]", KEY_FOUR, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) { inReviveMenu = false; inItemMenu = true; }
+            if (DrawGUIButton({900, 750, 200, 40}, "4. Cancel [B]", KEY_FOUR, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) { inReviveMenu = false; inItemMenu = true; }
         }
         else if (inTeamUpMenu) {
-            DrawText("TEAM-UPS:", 50, 700, 30, LIGHTGRAY);
+            DrawText("TEAM-UPS:", 580, 670, 30, WHITE);
             std::vector<TeamUpSkill> activeCombos = getActiveTeamUps(playerTeam, masterTeamUps);
-            if (activeCombos.empty()) DrawText("No Team-Ups available.", 50, 750, 20, RED);
+            
+            if (activeCombos.empty()) DrawText("No Team-Ups available.", 580, 750, 20, RED); 
             else {
                 int btnIndex = 0; int buttonKeys[4] = {KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR};
                 for (TeamUpSkill& combo : activeCombos) {
-                    Rectangle btn = { 50.0f, 740.0f + (btnIndex * 60), 400.0f, 45.0f };
+                    // Capped button width to 350 so it doesn't touch the right edge
+                    Rectangle btn = { 580.0f, 750.0f + (btnIndex * 50), 350.0f, 40.0f }; 
                     if (DrawGUIButton(btn, (std::to_string(btnIndex + 1) + ". " + combo.name + " [" + std::to_string(combo.momentumCost) + "%]").c_str(), buttonKeys[btnIndex], showDetailsPopup)) { if (teamMomentum >= combo.momentumCost) { selectedMove = combo.moveData; pendingMomentumCost = combo.momentumCost; moveSelected = true; } else GameLog::Add("[!] Not enough Momentum!"); }
                     btnIndex++;
                 }
             }
-            if (DrawGUIButton({480, 740, 200, 45}, "0. Cancel [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) inTeamUpMenu = false;
-        }
-        
-        // --- NEW: COMBAT SWAP MENU ---
-        else if (inSwapMenu) {
-            DrawText("SWAP CREW MEMBERS", 50, 700, 30, LIGHTGRAY);
-            DrawText("[ Click two slots to swap. Turn is NOT consumed! ]", 50, 735, 18, YELLOW);
             
-            // Build temporary arrays so we never pass nullptr to the real party vectors
+            // Shifted Cancel button to 1000 so it sits perfectly in the gap
+            if (DrawGUIButton({1000, 750, 200, 40}, "0. Cancel [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) inTeamUpMenu = false;
+        }
+        else if (inSwapMenu) {
+            DrawText("SWAP CREW MEMBERS", 580, 670, 30, WHITE);
+            DrawText("[ Click two slots to swap. Turn is NOT consumed! ]", 580, 710, 18, YELLOW);
+            
             std::vector<Entity*> tempActive(3, nullptr);
             for(size_t k = 0; k < playerTeam.size() && k < 3; k++) tempActive[k] = playerTeam[k];
             
@@ -383,7 +595,6 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
             auto DrawSlot = [&](Rectangle r, int g, int i) {
                 Entity* e = getEntity(g, i);
                 std::string label = e ? TextFormat("%s [HP: %d]", e->name.c_str(), e->currentHP) : "[ EMPTY ]";
-                Color btnColor = (swapGroup == g && swapIndex == i) ? ORANGE : DARKGRAY;
                 
                 if (DrawGUIButton(r, label.c_str(), 0, showDetailsPopup)) {
                     if (swapGroup == -1) { 
@@ -397,7 +608,6 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                         if (g == 0) tempActive[i] = temp;
                         else tempReserves[i] = temp;
                         
-                        // Push only non-null entities back to the real vectors
                         playerTeam.clear();
                         for (auto* ent : tempActive) if (ent != nullptr) playerTeam.push_back(ent);
                         
@@ -407,15 +617,20 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                         swapGroup = -1; swapIndex = -1;
                     }
                 }
+                // Highlight the selected slot
+                if (swapGroup == g && swapIndex == i) DrawRectangleLinesEx(r, 3, ORANGE);
             };
 
-            DrawText("ACTIVE:", 50, 765, 20, GREEN);
-            for (int i=0; i < 3; i++) DrawSlot({50, 790.0f + (i * 45), 250, 40}, 0, i);
+            DrawText("ACTIVE:", 580, 765, 20, GREEN);
+            // Shifted active slots to 580
+            for (int i=0; i < 3; i++) DrawSlot({580, 790.0f + (i * 45), 200, 40}, 0, i);
 
-            DrawText("RESERVES:", 320, 765, 20, GOLD);
-            for (int i=0; i < 3; i++) DrawSlot({320, 790.0f + (i * 45), 250, 40}, 1, i);
+            // Shifted reserve slots to 800 (Sitting right next to Active)
+            DrawText("RESERVES:", 800, 765, 20, GOLD);
+            for (int i=0; i < 3; i++) DrawSlot({800, 790.0f + (i * 45), 200, 40}, 1, i);
 
-            if (DrawGUIButton({600, 790, 200, 45}, "0. Back [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) {
+            // Shifted Back button to 1020 (Sitting to the right of Reserves)
+            if (DrawGUIButton({1020, 790, 200, 40}, "0. Back [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) {
                 inSwapMenu = false; swapGroup = -1; swapIndex = -1;
             }
         }
@@ -491,10 +706,10 @@ bool checkBattleEnd(std::vector<Entity*>& playerTeam, std::vector<Entity*>& enem
         if (allEnemiesDead) GameLog::Add("VICTORY!"); if (allPlayersDead) GameLog::Add("DEFEAT...");
                  
         for(int i = 0; i < 60; i++) { 
-             BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(playerTeam, enemyTeam, 0); EndDrawing();
+             BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, 0); EndDrawing();
         }
         while (!WindowShouldClose()) {
-            BeginDrawing(); ClearBackground(BLACK); DrawBattleOverlay(playerTeam, enemyTeam, 0);
+            BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, 0);
              
             DrawRectangle(0, 0, 1920, 1080, Fade(BLACK, 0.7f));
             if (allEnemiesDead) DrawText("VICTORY!", 1920/2 - MeasureText("VICTORY!", 100)/2, 400, 100, GREEN);
@@ -509,7 +724,7 @@ bool checkBattleEnd(std::vector<Entity*>& playerTeam, std::vector<Entity*>& enem
         
         double exitTime = GetTime();
         while (GetTime() - exitTime < 0.3 && !WindowShouldClose()) {
-            BeginDrawing(); ClearBackground(BLACK); EndDrawing();
+            BeginDrawing(); ClearBackground(DARKBLUE); EndDrawing();
         }
         return true;
     } 

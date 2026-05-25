@@ -10,6 +10,10 @@
 #include <string>
 #include <ctime>
 #include <algorithm>
+#include <map> // <--- ADD THIS HEADER
+
+// Removed the word "extern" so main.cpp officially owns this!
+std::map<ActorID, Texture2D> globalSprites;
 
 enum GameScreen { TITLE, HUB, RESTING, STORE, PARTY, CUSTOMIZE, ENCYCLOPEDIA, BATTLE };
 
@@ -77,14 +81,30 @@ void DrawDetailsOverlay(bool& showFlag, int type, Move m, std::string tuName, Pa
 int main() {
     srand(time(NULL)); InitWindow(1920, 1080, "The Crew - Pre-Alpha"); SetTargetFPS(60);
 
+    // --- NEW: LOAD TEXTURES ---
+    Texture2D texBrian = LoadTexture("Brian.png");
+    Texture2D texPaul = LoadTexture("Paul.png");
+    Texture2D texVince = LoadTexture("Vince.png");
+    
+    // Set to Point filtering so the pixel art doesn't blur when stretched
+    SetTextureFilter(texBrian, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texPaul, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texVince, TEXTURE_FILTER_POINT);
+
+    globalSprites[ActorID::Brian] = texBrian;
+    globalSprites[ActorID::Paul] = texPaul;
+    globalSprites[ActorID::Vince] = texVince;
+    // --------------------------
+
     std::vector<Entity*> activeParty(3, nullptr);
     std::vector<Entity*> reserves(3, nullptr);
     std::vector<Entity*> bench;
     
-    activeParty[0] = new Entity(buildBrian());
-    activeParty[1] = new Entity(buildPaul());
-    activeParty[2] = new Entity(buildVince());
-    bench.push_back(new Entity(buildYoungBrian()));
+    activeParty[0] = new Entity(buildYoungBrian());
+    
+    bench.push_back(new Entity(buildBrian()));
+    bench.push_back(new Entity(buildPaul()));
+    bench.push_back(new Entity(buildVince()));
     bench.push_back(new Entity(buildYoungPaul()));
     bench.push_back(new Entity(buildYoungVince()));
 
@@ -97,6 +117,7 @@ int main() {
     Entity* selectedCharForCustomization = nullptr; bool showCustomSelect = false; int customSlotType = 0; int customSlotIndex = 0;
     
     bool showDetailsPopup = false; 
+    bool editingAltStance = false; // <-- ADD THIS
     int detailsType = 0; 
     Move detailedMove; 
     std::string detailedTeamUpName = ""; 
@@ -104,10 +125,21 @@ int main() {
     ActiveID detailedActive = ActiveID::None;
 
     std::vector<MoveID> poolMoves = { 
-        MoveID::None, MoveID::Strike, MoveID::TakeCover, MoveID::SupportStrike, MoveID::ClumsySwing, 
-        MoveID::PaulBasic, MoveID::OneTwoPunch, MoveID::BobAndWeave, MoveID::KnifeSlash, MoveID::Haymaker, 
+        // Universal/Enemy moves
+        MoveID::None, MoveID::Strike, MoveID::Guard, MoveID::ClumsySwing, 
+
+        // Paul Moves Young
+        MoveID::OneTwoPunch,
+        // Paul Moves
+        MoveID::PaulBasic, MoveID::BobAndWeave, MoveID::KnifeSlash, MoveID::Haymaker, 
+
+        // Brian Moves Young (Support/Strike)
+        MoveID::StepOff, MoveID::FaintPunches,
+        // Brian Moves
         MoveID::BrianStrikeBasic, MoveID::BrianStrikeSkill, MoveID::BrianStrikeUlt, MoveID::BrianSupportBasic, 
         MoveID::BrianSupportSkill, MoveID::BrianSupportUlt, MoveID::VinceBasic, MoveID::Shove, 
+
+        // Vince Moves
         MoveID::MiniSledge, MoveID::Sledgehammer, MoveID::HoldTheLine 
     };
 
@@ -154,6 +186,28 @@ int main() {
             
             if (DrawMenuButton({100, 860, 400, 60}, "8. The Archives", PURPLE, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_EIGHT))) currentScreen = ENCYCLOPEDIA;
             if (DrawMenuButton({100, 940, 400, 60}, "9. Quit to Title", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_NINE))) currentScreen = TITLE;
+
+            // --- NEW: DEBUG RESET BUTTON ---
+            if (DrawMenuButton({1400, 940, 400, 60}, "[DEBUG] Reset Characters", MAROON, bgDisabled)) {
+                // 1. Safely delete the old modified memory pointers
+                for (Entity* p : activeParty) if (p) delete p;
+                for (Entity* p : reserves) if (p) delete p;
+                for (Entity* p : bench) if (p) delete p;
+
+                // 2. Clear the vectors
+                activeParty.clear(); activeParty.resize(3, nullptr);
+                reserves.clear(); reserves.resize(3, nullptr);
+                bench.clear();
+
+                // 3. Rebuild everyone exactly as they are when the game launches
+                activeParty[0] = new Entity(buildYoungBrian());
+                bench.push_back(new Entity(buildBrian()));
+                bench.push_back(new Entity(buildPaul()));
+                bench.push_back(new Entity(buildVince()));
+                bench.push_back(new Entity(buildYoungPaul()));
+                bench.push_back(new Entity(buildYoungVince()));
+            }
+            // -------------------------------
 
             if (showSavePopup) {
                 DrawRectangle(0, 0, 1920, 1080, Fade(BLACK, 0.8f)); 
@@ -211,7 +265,7 @@ int main() {
                     }
                 }
                 if (e != nullptr && CheckCollisionPointRec(GetMousePosition(), r) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !bgDisabled) { 
-                    selectedCharForCustomization = e; currentScreen = CUSTOMIZE; swapGroup = -1; 
+                    selectedCharForCustomization = e; currentScreen = CUSTOMIZE; swapGroup = -1; editingAltStance = false; // <-- ADDED HERE
                 }
             };
 
@@ -231,30 +285,88 @@ int main() {
             BeginDrawing(); ClearBackground(Fade(BLACK, 0.95f));
             DrawText(TextFormat("CUSTOMIZING: %s", selectedCharForCustomization->name.c_str()), 100, 30, 50, PURPLE);
             
+            // --- NEW: QUICK LEVEL ADJUSTMENT FOR YOUNG CHARACTERS ---
+            if (selectedCharForCustomization->currentStage == LifeStage::Young) {
+                // Level Down Button
+                if (DrawMenuButton({ 800, 35, 60, 40 }, "-", DARKGRAY, bgDisabled)) {
+                    if (selectedCharForCustomization->level > 1) {
+                        selectedCharForCustomization->level--;
+                        selectedCharForCustomization->expToNextLevel /= 1.5; // Reverse the EXP scaling
+                        
+                        EntityID id = selectedCharForCustomization->internalID;
+                        if (id == EntityID::YoungBrian) { selectedCharForCustomization->maxHP -= 17; selectedCharForCustomization->baseAttack -= 4; selectedCharForCustomization->baseDefense -= 2; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 3; }
+                        else if (id == EntityID::YoungPaul) { selectedCharForCustomization->maxHP -= 12; selectedCharForCustomization->baseAttack -= 3; selectedCharForCustomization->baseDefense -= 2; selectedCharForCustomization->baseSpeed -= 3; selectedCharForCustomization->baseBIQ -= 3; selectedCharForCustomization->baseSIQ -= 2; }
+                        else if (id == EntityID::YoungVince) { selectedCharForCustomization->maxHP -= 20; selectedCharForCustomization->baseAttack -= 4; selectedCharForCustomization->baseDefense -= 3; selectedCharForCustomization->baseSpeed -= 1; selectedCharForCustomization->baseBIQ -= 2; selectedCharForCustomization->baseSIQ -= 1; }
+                        
+                        selectedCharForCustomization->currentHP = selectedCharForCustomization->maxHP;
+                        selectedCharForCustomization->maxStamina = selectedCharForCustomization->baseSIQ * 2;
+                        selectedCharForCustomization->currentStamina = selectedCharForCustomization->maxStamina;
+                        selectedCharForCustomization->calculateActiveStats();
+                    }
+                }
+                
+                // Display Current Level
+                DrawText(TextFormat("Lv %d", selectedCharForCustomization->level), 880, 40, 30, YELLOW);
+                
+                // Level Up Button
+                if (DrawMenuButton({ 980, 35, 60, 40 }, "+", DARKGRAY, bgDisabled)) {
+                    if (selectedCharForCustomization->level < 15) {
+                        selectedCharForCustomization->levelUp();
+                    }
+                }
+            }
+            // --------------------------------------------------------
+            
+            // --- NEW: QUICK LEVEL ADJUSTMENT FOR YOUNG CHARACTERS ---
+            // ... [Keep your +/- level logic here exactly as it is] ...
+            // --------------------------------------------------------
+            
+            // --- NEW: STANCE STAT SHIFT PREVIEW ---
+            int displayBIQ = selectedCharForCustomization->baseBIQ;
+            int displaySIQ = selectedCharForCustomization->baseSIQ;
+            
+            // Spoof the stats to match toggleStance() if we are viewing the Alt Stance
+            if (selectedCharForCustomization->naturalAbility == PassiveID::ScrewDat && editingAltStance) {
+                displayBIQ = selectedCharForCustomization->baseSIQ; // <--- Now equals your actual base SIQ instead of 90!
+                displaySIQ = 0;
+            }
+            
             DrawText(TextFormat("HP: %d/%d  |  ATK: %d  |  DEF: %d  |  SPD: %d  |  STM: %d/%d  |  BIQ: %d  |  SIQ: %d", 
                 selectedCharForCustomization->currentHP, selectedCharForCustomization->maxHP,
                 selectedCharForCustomization->baseAttack, selectedCharForCustomization->baseDefense, 
                 selectedCharForCustomization->baseSpeed, selectedCharForCustomization->currentStamina, 
-                selectedCharForCustomization->maxStamina, selectedCharForCustomization->baseBIQ, 
-                selectedCharForCustomization->baseSIQ), 100, 90, 20, LIGHTGRAY);
+                selectedCharForCustomization->maxStamina, displayBIQ, displaySIQ), 100, 90, 20, LIGHTGRAY);
 
             int totalAbilitiesEquipped = selectedCharForCustomization->passiveAbilities.size() + selectedCharForCustomization->activeAbilities.size();
 
-            DrawText("CURRENT MOVESET:", 100, 150, 30, GREEN);
+            // --- NEW: Stance Toggle Logic ---
+            if (selectedCharForCustomization->actorID == ActorID::Brian) {
+                DrawText(editingAltStance ? "ALT MOVESET (STRIKE):" : "MOVESET (SUPPORT):", 100, 150, 30, GREEN);
+                if (DrawMenuButton({440, 145, 110, 40}, editingAltStance ? "-> SUPPORT" : "-> STRIKE", DARKGRAY, bgDisabled)) {
+                    editingAltStance = !editingAltStance;
+                }
+            } else {
+                DrawText("CURRENT MOVESET:", 100, 150, 30, GREEN);
+            }
+
             int yOffset = 200;
-            for (int i = 0; i < selectedCharForCustomization->combatMenu.size(); i++) {
+            // Tell the engine which array to look at and edit!
+            std::vector<Move>& activeEditMenu = editingAltStance ? selectedCharForCustomization->altCombatMenu : selectedCharForCustomization->combatMenu;
+
+            for (int i = 0; i < activeEditMenu.size(); i++) {
                 Rectangle btn = { 100.0f, (float)yOffset, 450.0f, 50.0f };
-                std::string text = selectedCharForCustomization->combatMenu[i].name + " [" + std::to_string(selectedCharForCustomization->combatMenu[i].staminaCost) + " STM]";
+                std::string text = activeEditMenu[i].name + " [" + std::to_string(activeEditMenu[i].staminaCost) + " STM]";
                 
                 if (DrawMenuButton(btn, text.c_str(), DARKGRAY, bgDisabled)) { customSlotType = 1; customSlotIndex = i; showCustomSelect = true; }
-                if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !bgDisabled) { detailedMove = selectedCharForCustomization->combatMenu[i]; detailsType = 1; showDetailsPopup = true; }
+                if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !bgDisabled) { detailedMove = activeEditMenu[i]; detailsType = 1; showDetailsPopup = true; }
                 yOffset += 60;
             }
-            if (selectedCharForCustomization->combatMenu.size() < 4) {
+            if (activeEditMenu.size() < 4) {
                 if (DrawMenuButton({100.0f, (float)yOffset, 450.0f, 50.0f}, "+ Add Move", Fade(GREEN, 0.2f), bgDisabled)) {
-                    Move placeholder = getMove(MoveID::Strike); selectedCharForCustomization->combatMenu.push_back(placeholder); customSlotType = 1; customSlotIndex = selectedCharForCustomization->combatMenu.size() - 1; showCustomSelect = true;
+                    Move placeholder = getMove(MoveID::Strike); activeEditMenu.push_back(placeholder); customSlotType = 1; customSlotIndex = activeEditMenu.size() - 1; showCustomSelect = true;
                 }
             }
+            // --------------------------------
 
             DrawText(TextFormat("PASSIVE ABILITIES (%d/3 MAX):", totalAbilitiesEquipped), 650, 150, 30, SKYBLUE);
             yOffset = 200;
@@ -301,11 +413,14 @@ int main() {
                         Rectangle btn = { (float)gridX, (float)gridY, 350.0f, 50.0f };
                         
                         if (DrawMenuButton(btn, label.c_str(), DARKGRAY, showDetailsPopup)) {
+                            // --- NEW: Applies the move to the currently viewed stance! ---
+                            std::vector<Move>& targetMenu = editingAltStance ? selectedCharForCustomization->altCombatMenu : selectedCharForCustomization->combatMenu;
+                            
                             if (mID == MoveID::None) {
-                                if (selectedCharForCustomization->combatMenu.size() > 1) 
-                                    selectedCharForCustomization->combatMenu.erase(selectedCharForCustomization->combatMenu.begin() + customSlotIndex);
+                                if (targetMenu.size() > 1) 
+                                    targetMenu.erase(targetMenu.begin() + customSlotIndex);
                             } else {
-                                selectedCharForCustomization->combatMenu[customSlotIndex] = getMove(mID);
+                                targetMenu[customSlotIndex] = getMove(mID);
                             }
                             showCustomSelect = false;
                         }
@@ -354,26 +469,54 @@ int main() {
             EndDrawing();
         }
         else if (currentScreen == ENCYCLOPEDIA) {
-            static int activeTab = 0; BeginDrawing(); ClearBackground(DARKBLUE); DrawText("THE CREW ARCHIVES", 100, 50, 60, GOLD);
-            if (DrawMenuButton({100, 160, 300, 60}, "1. Moves", (activeTab == 0) ? GOLD : GRAY, bgDisabled)) activeTab = 0;
-            if (DrawMenuButton({100, 240, 300, 60}, "2. Passives", (activeTab == 1) ? GOLD : GRAY, bgDisabled)) activeTab = 1;
-            if (DrawMenuButton({100, 320, 300, 60}, "3. Actives", (activeTab == 2) ? GOLD : GRAY, bgDisabled)) activeTab = 2;
-            if (DrawMenuButton({100, 400, 300, 60}, "4. Team-Ups", (activeTab == 3) ? GOLD : GRAY, bgDisabled)) activeTab = 3;
-            if (DrawMenuButton({100, 900, 300, 60}, "5. Back to Hub [B]", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyReleased(KEY_B))) currentScreen = HUB;
+            static int activeTab = 0; 
+            static int scrollY = 0; // Tracks scrolling position
+            
+            BeginDrawing(); ClearBackground(DARKBLUE); DrawText("THE CREW ARCHIVES", 100, 50, 60, GOLD);
+            
+            // Reset scroll to 0 whenever a new tab is clicked
+            if (DrawMenuButton({100, 160, 300, 60}, "1. Moves", (activeTab == 0) ? GOLD : GRAY, bgDisabled)) { activeTab = 0; scrollY = 0; }
+            if (DrawMenuButton({100, 240, 300, 60}, "2. Passives", (activeTab == 1) ? GOLD : GRAY, bgDisabled)) { activeTab = 1; scrollY = 0; }
+            if (DrawMenuButton({100, 320, 300, 60}, "3. Actives", (activeTab == 2) ? GOLD : GRAY, bgDisabled)) { activeTab = 2; scrollY = 0; }
+            if (DrawMenuButton({100, 400, 300, 60}, "4. Team-Ups", (activeTab == 3) ? GOLD : GRAY, bgDisabled)) { activeTab = 3; scrollY = 0; }
+            if (DrawMenuButton({100, 900, 300, 60}, "5. Back to Hub [B]", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyReleased(KEY_B))) { currentScreen = HUB; scrollY = 0; }
 
             DrawRectangle(450, 150, 1400, 800, Fade(BLACK, 0.8f)); DrawRectangleLines(450, 150, 1400, 800, WHITE);
 
+            // --- SCROLL LOGIC ---
+            // Only allow scrolling if the mouse is hovering over the display box
+            if (CheckCollisionPointRec(GetMousePosition(), {450, 150, 1400, 800})) {
+                scrollY += GetMouseWheelMove() * 40; // 40 pixels per scroll notch
+                if (scrollY > 0) scrollY = 0; // Prevent scrolling down past the top
+            }
+            
+            // Disable clicks on list items if the mouse is outside the scissor box
+            bool listDisabled = bgDisabled || !CheckCollisionPointRec(GetMousePosition(), {450, 150, 1400, 800});
+
+            // Visually clip everything outside of this box
+            BeginScissorMode(450, 150, 1400, 800);
+
             if (activeTab == 0) {
-                int yPos = 250;
-                for (int i = 1; i < poolMoves.size(); i++) {
-                    int xPos = (i < 11) ? 480 : 1100; int yRender = (i < 11) ? yPos + ((i-1) * 60) : yPos + ((i - 11) * 60);
-                    if (DrawMenuButton({ (float)xPos, (float)yRender, 550.0f, 50.0f }, getMoveName(poolMoves[i]).c_str(), DARKGRAY, bgDisabled)) { 
-                        detailedMove = getMove(poolMoves[i]); detailsType = 1; showDetailsPopup = true; 
+                int yPos = 180 + scrollY;
+                
+                std::vector<MoveCategory> categories = { MoveCategory::Basic, MoveCategory::Skill, MoveCategory::Ultimate, MoveCategory::Support };
+                for (MoveCategory cat : categories) {
+                    DrawText(getCategoryName(cat).c_str(), 480, yPos, 40, SKYBLUE); yPos += 60;
+                    
+                    for (int i = 1; i < poolMoves.size(); i++) {
+                        Move m = getMove(poolMoves[i]);
+                        if (m.category == cat) {
+                            if (DrawMenuButton({ 480.0f, (float)yPos, 550.0f, 50.0f }, m.name.c_str(), DARKGRAY, listDisabled)) { 
+                                detailedMove = m; detailsType = 1; showDetailsPopup = true; 
+                            }
+                            yPos += 60;
+                        }
                     }
+                    yPos += 40; // Spacing between categories
                 }
             }
             else if (activeTab == 1) {
-                int yPos = 250;
+                int yPos = 180 + scrollY;
                 for (int i = 1; i < MASTER_PASSIVE_POOL.size(); i++) { 
                     PassiveID pID = MASTER_PASSIVE_POOL[i];
                     DrawText(getPassiveName(pID).c_str(), 480, yPos, 25, YELLOW); 
@@ -381,7 +524,7 @@ int main() {
                 }
             }
             else if (activeTab == 2) {
-                int yPos = 250;
+                int yPos = 180 + scrollY;
                 for (int i = 1; i < MASTER_ACTIVE_POOL.size(); i++) { 
                     ActiveID aID = MASTER_ACTIVE_POOL[i];
                     DrawText(getActiveName(aID).c_str(), 480, yPos, 25, ORANGE); 
@@ -389,16 +532,32 @@ int main() {
                 }
             }
             else if (activeTab == 3) {
-                int yPos = 250;
+                int yPos = 180 + scrollY;
+                
+                // 3-Man Team-Ups
+                DrawText("3-MAN TEAM-UPS", 480, yPos, 40, ORANGE); yPos += 60;
                 for (TeamUpSkill tu : masterTeamUps) {
-                    if (DrawMenuButton({ 480.0f, (float)yPos, 600.0f, 60.0f }, tu.name.c_str(), PURPLE, bgDisabled)) { detailedTeamUpName = tu.name; detailsType = 2; showDetailsPopup = true; }
-                    
-                    std::string reqs = "Crew Required: "; 
-                    for (ActorID r : tu.requiredMembers) reqs += getActorName(r) + " "; 
-                    
-                    DrawText(reqs.c_str(), 1100, yPos + 20, 25, SKYBLUE); yPos += 80;
+                    if (tu.requiredMembers.size() == 3) {
+                        if (DrawMenuButton({ 480.0f, (float)yPos, 600.0f, 60.0f }, tu.name.c_str(), PURPLE, listDisabled)) { detailedTeamUpName = tu.name; detailsType = 2; showDetailsPopup = true; }
+                        std::string reqs = "Crew Required: "; for (ActorID r : tu.requiredMembers) reqs += getActorName(r) + " "; 
+                        DrawText(reqs.c_str(), 1100, yPos + 20, 25, SKYBLUE); yPos += 80;
+                    }
+                }
+                
+                yPos += 40; // Spacer
+                
+                // 2-Man Team-Ups
+                DrawText("2-MAN TEAM-UPS", 480, yPos, 40, ORANGE); yPos += 60;
+                for (TeamUpSkill tu : masterTeamUps) {
+                    if (tu.requiredMembers.size() == 2) {
+                        if (DrawMenuButton({ 480.0f, (float)yPos, 600.0f, 60.0f }, tu.name.c_str(), PURPLE, listDisabled)) { detailedTeamUpName = tu.name; detailsType = 2; showDetailsPopup = true; }
+                        std::string reqs = "Crew Required: "; for (ActorID r : tu.requiredMembers) reqs += getActorName(r) + " "; 
+                        DrawText(reqs.c_str(), 1100, yPos + 20, 25, SKYBLUE); yPos += 80;
+                    }
                 }
             }
+            EndScissorMode(); // Stop clipping
+            
             if (showDetailsPopup) DrawDetailsOverlay(showDetailsPopup, detailsType, detailedMove, detailedTeamUpName, detailedPassive, detailedActive, masterTeamUps);
             EndDrawing();
         }
@@ -444,5 +603,8 @@ int main() {
             currentScreen = HUB;
         }
     }
+    UnloadTexture(texBrian);
+    UnloadTexture(texPaul);
+    UnloadTexture(texVince);
     CloseWindow(); return 0;
 }
