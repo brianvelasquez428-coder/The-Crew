@@ -1,36 +1,7 @@
 #include "Entity.h"
+#include "Logger.h"
 #include <iostream>
 #include <algorithm>
-
-std::string getStatusName(StatusID id) {
-    switch(id) {
-        case StatusID::TauntedATK: return "Taunted ATK";
-        case StatusID::TauntedDEF: return "Taunted DEF";
-        case StatusID::Taunting: return "Taunting";
-        case StatusID::DeepEndSIQ: return "Deep End SIQ";
-        case StatusID::DeepEndBIQ: return "Deep End BIQ";
-        case StatusID::Bleed: return "Bleed";
-        case StatusID::GuardBreak: return "Guard Break";
-        case StatusID::Hardened: return "Hardened";
-        case StatusID::Slowed: return "Slowed";
-        case StatusID::GuardBroken: return "Guard Broken";
-        case StatusID::BoggedDown: return "Bogged Down";
-        case StatusID::PrecisionDEFDrop: return "Precision DEF Drop";
-        case StatusID::PrecisionBIQDrop: return "Precision BIQ Drop";
-        case StatusID::WindKnockedOut: return "Wind Knocked Out";
-        case StatusID::Stunned: return "Stunned";
-        case StatusID::DemolitionistATK: return "Demolitionist ATK";
-        case StatusID::DemolitionistBIQ: return "Demolitionist BIQ";
-        case StatusID::CrashOutATK: return "Crash Out ATK";
-        case StatusID::CrashOutDEF: return "Crash Out DEF";
-        case StatusID::UnstoppableATK: return "Unstoppable ATK";
-        case StatusID::UnstoppableSPD: return "Unstoppable SPD";
-        case StatusID::LightFeet: return "Light Feet";
-        case StatusID::HeavyHands: return "Heavy Hands";
-        case StatusID::IronWill: return "Iron Will";
-        default: return "Unknown Status";
-    }
-}
 
 Entity::Entity(std::string spawnName, LifeStage spawnStage, bool spawnIsBoss) {
     name = spawnName; 
@@ -38,11 +9,14 @@ Entity::Entity(std::string spawnName, LifeStage spawnStage, bool spawnIsBoss) {
     actorID = ActorID::Enemy;       
     currentStage = spawnStage; currentPhase = 1; isBoss = spawnIsBoss;
     
+    
     // ---> FIX: Use nullptr instead of "None"
     grabbedBy = nullptr; isGrabbed = false; shieldHP = 0; 
     
-    usedActiveNatural = false; usedActiveAbilityThisTurn = false; usedActives.clear(); isAltStance = false;           
-    tempDamageBonus = 0; hitNullificationStacks = 0; screwDatStacks = 0; screwDatDecayTimer = 0;
+    naturalAbility = NaturalID::None; naturalActiveUsedThisBattle = false; hasCrashedOut = false; mediatorAwakened = false; 
+    usedActiveAbilityThisTurn = false; usedActives.clear(); isAltStance = false;           
+
+    tempDamageBonus = 0; hitNullificationStacks = 0; screwDatStacks = 0; supportHealStacks = 0; screwDatDecayTimer = 0;
     currentHP = maxHP; isAlive = true;      
     currentAttack = baseAttack; currentDefense = baseDefense; currentSpeed = baseSpeed; currentStamina = maxStamina;
     level = 1; currentEXP = 0; expToNextLevel = 100; expDropValue = 0; moneyDropValue = 0; 
@@ -53,49 +27,36 @@ void Entity::addStatus(StatusEffect s) {
         for (auto& existing : activeStatuses) {
             if (existing.id == s.id) {
                 existing.duration = s.duration; 
-                existing.value = s.value;       
+                existing.statModifier = s.statModifier; // Updated payload name
                 calculateActiveStats();
                 return;
             }
         }
     }
     
-    // --- NEW: Simplified Popup Text Logic ---
-    bool isBuff = true;
-    if (s.type == StatusType::StatModifier && s.value < 0) isBuff = false;
-    if (s.type == StatusType::Bleed || s.type == StatusType::Stun || s.type == StatusType::StaminaPenalty || s.type == StatusType::Taunt) isBuff = false;
-
-    std::string pText = "";
-    if (s.type == StatusType::StatModifier) {
+    // UI Popup Logic is now entirely data-driven!
+    bool isBuff = (s.category == StatusCategory::Buff);
+    std::string pText = s.name; // Reads the name directly from the struct
+    
+    if (s.category == StatusCategory::Buff || s.category == StatusCategory::Debuff) {
         std::string statName = "";
         if (s.targetStat == StatName::ATK) statName = "ATK";
         else if (s.targetStat == StatName::DEF) statName = "DEF";
         else if (s.targetStat == StatName::SPD) statName = "SPD";
         else if (s.targetStat == StatName::BIQ) statName = "BIQ";
         else if (s.targetStat == StatName::SIQ) statName = "SIQ";
-
-        if (s.value > 0) pText = statName + " UP";
+        
+        if (s.statModifier > 0) pText = statName + " UP";
         else pText = statName + " DOWN";
-    } 
-    else if (s.type == StatusType::Bleed) pText = "BLEED";
-    else if (s.type == StatusType::Stun) pText = "STUN";
-    else if (s.type == StatusType::Taunt) pText = "TAUNT";
-    else if (s.type == StatusType::StaminaPenalty) pText = "STAMINA DOWN"; // <--- FIXED THIS!
-    else {
-        // Fallback: If any other custom statuses slip through, we force them to be short here
-        std::string rawName = getStatusName(s.id);
-        if (rawName == "Wind Knocked Out") pText = "STAMINA DOWN";
-        else pText = rawName; 
     }
-
+    
     pendingPopups.push_back({pText, isBuff});
-
     activeStatuses.push_back(s);
     calculateActiveStats();
 }
 
-bool Entity::hasStatus(StatusType type) {
-    for (auto& s : activeStatuses) if (s.type == type) return true;
+bool Entity::hasStatus(StatusCategory category) {
+    for (auto& s : activeStatuses) if (s.category == category) return true;
     return false;
 }
 
@@ -104,19 +65,68 @@ bool Entity::hasStatusID(StatusID id) {
     return false;
 }
 
-void Entity::removeStatusByType(StatusType type) {
+void Entity::removeStatusByType(StatusCategory category) {
     activeStatuses.erase(std::remove_if(activeStatuses.begin(), activeStatuses.end(),
-        [type](const StatusEffect& s) { return s.type == type; }), activeStatuses.end());
+        [category](const StatusEffect& s) { return s.category == category; }), activeStatuses.end());
     calculateActiveStats();
 }
 
-// In CORE/Entity.cpp (Around line 70)
+int Entity::getDamageReduction() {
+    int dr = 0;
+    
+    // Mediator Logic
+    if (naturalAbility == NaturalID::Mediator) {
+        dr += mediatorAwakened ? 30 : 15;
+    }
+    
+    // Future-proofing: You can easily add a loop here later that checks activeStatuses 
+    // for generic "Damage Reduction" buffs without ever touching takeDamage again!
+    
+    return dr;
+}
+
+void Entity::triggerOnHitPassives() {
+    if (!isAlive) return;
+
+    // TONY'S SPARRING
+    if (naturalAbility == NaturalID::Sparring) {
+        int defBonus = std::max(1, (int)(baseDefense * 0.05));
+        addStatus({StatusID::SparringDEF, "Sparring DEF", StatusCategory::Buff, StatName::DEF, defBonus, 0, false, false, false, 1, true});
+        std::cout << "   [SPARRING] " << name << " adjusts their guard! (DEF +5%)\n";
+        pendingLogMessages.push_back("[SPARRING] " + name + " adjusts their guard! (DEF +5%)");
+    }
+
+    // PAUL'S CRASH OUT
+    if (naturalAbility == NaturalID::CrashOut) {
+        int atkBonus = std::max(1, (int)(baseAttack * 0.05));
+        int spdBonus = std::max(1, (int)(baseSpeed * 0.05));
+        addStatus({StatusID::CrashOutHitBuffATK, "Crash Out ATK", StatusCategory::Buff, StatName::ATK, atkBonus, 0, false, false, false, 99, true});
+        addStatus({StatusID::CrashOutHitBuffSPD, "Crash Out SPD", StatusCategory::Buff, StatName::SPD, spdBonus, 0, false, false, false, 99, true});
+
+        int currentStacks = 0;
+        for (auto& s : activeStatuses) {
+            if (s.id == StatusID::CrashOutHitBuffATK) currentStacks++;
+        }
+        pendingLogMessages.push_back("[CRASH OUT] " + name + " takes a hit!");
+        pendingLogMessages.push_back("            (ATK & SPD +5%, Stack " + std::to_string(currentStacks) + ")");
+
+        // Crash Out Burst Check
+        if (!hasCrashedOut && ((float)currentHP / maxHP) < 0.60f) {
+            hasCrashedOut = true;
+            addStatus({StatusID::CrashOutATK, "Crash Out Burst", StatusCategory::Buff, StatName::ATK, (int)(baseAttack * 0.50), 0, false, false, false, 3, false});
+            addStatus({StatusID::CrashOutDEF, "Crash Out Guard", StatusCategory::Buff, StatName::DEF, (int)(baseDefense * 0.50), 0, false, false, false, 3, false});
+            std::cout << "\n>>> PAUL IS CRASHING OUT! (ATK & DEF +50% for 3 turns!) <<<\n";
+            pendingLogMessages.push_back("[WARNING] " + name + " IS CRASHING OUT!");
+            pendingLogMessages.push_back("          (ATK & DEF +50% for 3 turns!)");
+        }
+    }
+}
 
 int Entity::takeDamage(int rawDamage, bool isCritical) {
     if (shieldHP > 0 && isCriticalOnlyShield == true) {
         if (!isCritical) { 
             std::cout << name << "'s filter absorbed the attack! (0 Damage)\n"; 
-            return 0; // <--- Returns 0 if blocked
+            return 0; 
         }
         else std::cout << "Critical Strike Pierces though the filter!\n";
     }
@@ -124,20 +134,25 @@ int Entity::takeDamage(int rawDamage, bool isCritical) {
     float defenseMultiplier = 100.0f / (100.0f + currentDefense);       
     float calculatedDamage = rawDamage * defenseMultiplier;                    
     
-    if (isCritical) {
-        calculatedDamage *= 2.0f;
-    }
+    if (isCritical) calculatedDamage *= 2.0f;
     
     float variance = 1.0f + (((rand() % 21) - 10) / 100.0f);
     calculatedDamage *= variance;
     
     int finalDamage = std::max(1, (int)calculatedDamage);
     
-    // ... [The rest of your shield / HP deduction logic stays exactly the same from here down]
+    // --- NEW: CLEAN DAMAGE REDUCTION HOOK ---
+    int drPercent = getDamageReduction();
+    if (drPercent > 0) {
+        finalDamage = (int)(finalDamage * (1.0f - (drPercent / 100.0f)));
+    }
+    // ----------------------------------------
+    
     if (shieldHP > 0) {
         int damageToShield = std::min(shieldHP, finalDamage);
         shieldHP -= damageToShield;
         int spilloverDamage = finalDamage - damageToShield;
+        
         if (shieldHP <= 0) {
             shieldHP = 0; isCriticalOnlyShield = false; 
             if (isCritical) std::cout << "   [CRIT!] "; else std::cout << "   ";
@@ -156,7 +171,15 @@ int Entity::takeDamage(int rawDamage, bool isCritical) {
         if (isCritical) std::cout << "   [CRIT!] " << name << " takes " << finalDamage << " damage! (" << currentHP << " HP remaining)\n";
         else std::cout << "   " << name << " takes " << finalDamage << " damage! (" << currentHP << " HP remaining)\n";
     }
-    if (currentHP <= 0) { currentHP = 0; isAlive = false; std::cout << "\n>>> " << name << " has been knocked out! <<<\n"; }
+    
+    if (currentHP <= 0) { 
+        currentHP = 0; isAlive = false; 
+        std::cout << "\n>>> " << name << " has been knocked out! <<<\n"; 
+    }
+
+    // --- NEW: CLEAN ON-HIT PASSIVE HOOK ---
+    triggerOnHitPassives();
+    // --------------------------------------
 
     return finalDamage;
 }
@@ -175,6 +198,7 @@ bool Entity::checkPhaseTransition() {
         baseAttack = extraPhases[0].newAttack; baseDefense = extraPhases[0].newDefense; baseSpeed = extraPhases[0].newSpeed;
         baseBIQ = extraPhases[0].newBIQ; baseSIQ = extraPhases[0].newSIQ; maxStamina = baseSIQ * 2; 
         
+        // Change this line to match the new enum
         naturalAbility = extraPhases[0].newNaturalAbility; passiveAbilities = extraPhases[0].newPassiveAbilities; 
         activeAbilities = extraPhases[0].newActiveAbilities; combatMenu = extraPhases[0].newCombatMenu;
         currentPhase++; extraPhases.erase(extraPhases.begin());                     
@@ -207,96 +231,134 @@ void Entity::healHP(int amount) {
 
 void Entity::endOfTurnUpdate() {
     for (auto it = activeStatuses.begin(); it != activeStatuses.end(); ) {
-        if (it->type == StatusType::Bleed) {
-            std::cout << "\n   [BLEED] " << name << " loses " << it->value << " HP from the open wound!\n";
-            currentHP -= it->value;
-            if (currentHP <= 0) { currentHP = 0; isAlive = false; std::cout << ">>> " << name << " succumbed to their wounds! <<<\n"; }
+        
+        // --- FIX: Data-Driven DoT routed to GameLog ---
+        if (it->dotDamage > 0) {
+            GameLog::Add("[" + it->name + "] " + name + " loses " + std::to_string(it->dotDamage) + " HP!");
+            currentHP -= it->dotDamage;
+            if (currentHP <= 0) { currentHP = 0; isAlive = false; GameLog::Add(">>> " + name + " succumbed to their wounds! <<<"); }
         }
+        
         it->duration--;
         if (it->duration <= 0) {
-            if (it->type == StatusType::Stun) std::cout << name << " shook off the stun and is ready to fight!\n";
-            else if (it->type == StatusType::Taunt) std::cout << name << " is no longer drawing attacks.\n";
-            else if (it->type == StatusType::StaminaPenalty) std::cout << name << " catches their breath! (Stamina Regen restored)\n";
-            else std::cout << name << "'s [" << getStatusName(it->id) << "] wore off.\n";
-            it = activeStatuses.erase(it); 
+            // --- FIX: Expiration text routed to GameLog ---
+            if (it->causesStun) GameLog::Add(name + " shook off the stun and is ready to fight!");
+            else if (it->causesTaunt) GameLog::Add(name + " is no longer drawing attacks.");
+            else if (it->halvesStaminaRegen) GameLog::Add(name + " catches their breath! (Stamina Regen restored)");
+            else GameLog::Add(name + "'s [" + it->name + "] wore off.");
+            
+            // Paul's Exhaustion check
+            if (it->id == StatusID::CrashOutDEF) {
+                GameLog::Add(name + "'s adrenaline fades... the crash out is over.");
+                addStatus({StatusID::CrashOutExhaustion, "Crash Out Exhaustion", StatusCategory::Debuff, StatName::DEF, (int)(-baseDefense * 0.50), 0, false, false, false, 2, false});
+            }
+            
+            it = activeStatuses.erase(it);
         } else {
             ++it;
         }
     }
     
-    if (screwDatDecayTimer > 0) {
-        screwDatDecayTimer--;
-        if (screwDatDecayTimer <= 0) { screwDatStacks = 0; std::cout << "   [FADED] " << name << "'s Strike Ultimate momentum has completely vanished!\n"; }
+    if (naturalAbility == NaturalID::ScrewDat) {
+        if (isAltStance) {
+            // Decay timer resets to 2 ONLY if you actually end your turn in Strike
+            screwDatDecayTimer = 2;
+        } else {
+            // THE FIX: If you have stacks, force the countdown even if it hits negatives
+            if (screwDatStacks > 0) {
+                screwDatDecayTimer--;
+                
+                if (screwDatDecayTimer <= 0) { 
+                    screwDatStacks = 0; 
+                    screwDatDecayTimer = 0; // Clamp it back to 0 just to be clean
+                    std::cout << "   [FADED] " << name << "'s Strike Ultimate momentum has completely vanished!\n"; 
+                    GameLog::Add("[SCREW DAT] Strike Ultimate momentum has completely vanished!"); 
+                }
+            }
+        }
     }
-         
     calculateActiveStats();
-    regenerateStamina(); 
+    regenerateStamina();
 }
 
 void Entity::calculateActiveStats() {
     currentAttack = baseAttack; currentDefense = baseDefense; currentSpeed = baseSpeed;
     currentBIQ = baseBIQ; currentSIQ = baseSIQ;
          
-    for (auto& s : activeStatuses) {
-        if (s.type == StatusType::StatModifier) {
-            if (s.targetStat == StatName::ATK) currentAttack += s.value;
-            if (s.targetStat == StatName::DEF) currentDefense += s.value;
-            if (s.targetStat == StatName::SPD) currentSpeed += s.value;
-            if (s.targetStat == StatName::BIQ) currentBIQ += s.value;
-            if (s.targetStat == StatName::SIQ) currentSIQ += s.value;
+    // --- THE FIX: MOVE STANCE OVERRIDES BEFORE THE BUFF LOOP ---
+    if (naturalAbility == NaturalID::ScrewDat) {
+        if (isAltStance) {
+            // Sets his starting BIQ to his Base SIQ BEFORE buffs apply
+            currentBIQ = baseSIQ; 
+            // Drops SIQ to 0
+            currentSIQ = 0; 
         }
     }
     
-    // --- STANCE OVERRIDES ---
-    if (naturalAbility == PassiveID::ScrewDat && isAltStance) {
-        // Brian's Strike Stance: 
-        // BIQ becomes the higher of his current SIQ (buffs applied) or his Base SIQ (ignoring debuffs).
-        currentBIQ = std::max(currentSIQ, baseSIQ); 
-        
-        // SIQ drops to 0 for evasion/support purposes, but maxStamina is untouched.
-        currentSIQ = 0; 
+    for (auto& s : activeStatuses) {
+        // Read Categories instead of specific Types, and use the new statModifier variable
+        if (s.category == StatusCategory::Buff || s.category == StatusCategory::Debuff) {
+            if (s.targetStat == StatName::ATK) currentAttack += s.statModifier;
+            if (s.targetStat == StatName::DEF) currentDefense += s.statModifier;
+            if (s.targetStat == StatName::SPD) currentSpeed += s.statModifier;
+            if (s.targetStat == StatName::BIQ) currentBIQ += s.statModifier;
+            if (s.targetStat == StatName::SIQ) currentSIQ += s.statModifier;
+        }
     }
-    // ------------------------
 
     currentAttack = std::max(1, currentAttack); currentDefense = std::max(0, currentDefense);
     currentSpeed = std::max(0, currentSpeed); currentBIQ = std::max(0, currentBIQ); currentSIQ = std::max(0, currentSIQ);
 }
 
 void Entity::resetStats() {
-    activeStatuses.clear(); 
-    isAltStance = false; screwDatStacks = 0; screwDatDecayTimer = 0; hitNullificationStacks = 0; shieldHP = 0;
-    usedActiveAbilityThisTurn = false; usedActives.clear();
-    calculateActiveStats();
+    activeStatuses.clear();
+    
+    // isAltStance = false; <--- DELETE THIS ENTIRE LINE!
+    usedActiveAbilityThisTurn = false; 
+    usedActives.clear();
+    
+    // --- THE FIX: WIPE ALL NATURAL ABILITY MEMORY ---
+    naturalActiveUsedThisBattle = false; 
+    hasCrashedOut = false; 
+    mediatorAwakened = false;
+    
+    screwDatStacks = 0; 
+    screwDatDecayTimer = 0; 
+    supportHealStacks = 0; 
+    
+    hitNullificationStacks = 0; 
+    shieldHP = 0;
+    
+    currentAttack = baseAttack; 
+    currentDefense = baseDefense; 
+    currentSpeed = baseSpeed;
+    currentBIQ = baseBIQ; 
+    currentSIQ = baseSIQ;
 }
 
 void Entity::toggleStance() {
     isAltStance = !isAltStance; 
     combatMenu.swap(altCombatMenu); 
     
-    if (naturalAbility == PassiveID::ScrewDat) {
-        if (isAltStance) {
-            screwDatDecayTimer = 0; 
-            std::cout << name << " shifted into STRIKE STANCE! (Ultimate decay paused!)\n";
-        } else {
-            if (screwDatStacks > 0) { 
-                screwDatDecayTimer = 2; 
-                std::cout << name << " shifted into SUPPORT STANCE! (Ultimate stacks will decay in 2 rounds!)\n"; 
-            } else {
-                std::cout << name << " shifted into SUPPORT STANCE!\n"; 
-            }
-        }
+    // THE FIX: We completely removed the screwDatDecayTimer logic from here.
+    // Changing stances no longer instantly manipulates the decay!
+    
+    if (naturalAbility == NaturalID::ScrewDat) {
+        if (isAltStance) std::cout << name << " shifted into STRIKE STANCE!\n";
+        else std::cout << name << " shifted into SUPPORT STANCE!\n"; 
     } else {
         if (isAltStance) std::cout << name << " shifted into their Alternate Stance!\n";
         else std::cout << name << " shifted into their Normal Stance!\n";
     }
-    // Always recalculate stats when a stance changes!
+    
     calculateActiveStats(); 
 }
 
 void Entity::regenerateStamina() {
     int regenAmount = (currentSIQ / 4);          
     for (auto& s : activeStatuses) {
-        if (s.type == StatusType::StaminaPenalty) regenAmount = regenAmount * (100 - s.value) / 100; 
+        // Checking the direct payload flag instead of a generic StatusType
+        if (s.halvesStaminaRegen) regenAmount = regenAmount * (100 - s.statModifier) / 100; 
     }
     currentStamina += regenAmount; if (currentStamina > maxStamina) currentStamina = maxStamina;
 }

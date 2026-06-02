@@ -12,14 +12,13 @@
 #include <algorithm>
 #include <map> // <--- ADD THIS HEADER
 
-// Removed the word "extern" so main.cpp officially owns this!
+// ---> ADD THE NEW MAP DEFINITION HERE <---
 std::map<ActorID, Texture2D> globalSprites;
+std::map<ActorID, Texture2D> globalAttackSprites;
 
 enum GameScreen { TITLE, HUB, RESTING, STORE, PARTY, CUSTOMIZE, ENCYCLOPEDIA, BATTLE };
 
 // --- TRANSLATION HELPERS ---
-std::string getTargetText(MoveTarget t) { switch(t) { case MoveTarget::Self: return "Self"; case MoveTarget::OneEnemy: return "1 Enemy"; case MoveTarget::TwoEnemies: return "2 Enemies"; case MoveTarget::AllEnemies: return "All Enemies"; case MoveTarget::OneAlly: return "1 Ally"; case MoveTarget::TwoAllies: return "2 Allies"; case MoveTarget::AllAllies: return "All Allies"; default: return "Unknown"; } }
-std::string getEffectText(Effect e) { switch(e) { case Effect::None: return "No special effect."; case Effect::RestoreStamina: return "Restores 25 Stamina."; case Effect::DefenseScalingDamage: return "Uses user's Defense stat to calculate damage."; case Effect::ApplyBleed: return "Applies Bleed (5 DMG/turn) for 3 turns."; case Effect::IgnoreDefense: return "Ignores 50% of the target's Defense."; case Effect::DefenseBuff40: return "Increases Defense by 40% and adds 1 Hit Nullification."; case Effect::HealAndCleanse: return "Heals 40% HP and cures all status conditions."; case Effect::LowerPriority: return "Reduces target's Speed by 15 for 2 turns."; case Effect::StrikeDefenseDebuff: return "Reduces target's Defense by 40% for 2 turns."; case Effect::StrikeUlt: return "Guaranteed Hit & Crit. Consumes stacks for massive damage."; case Effect::SlowEnemy: return "Reduces target's Speed by 20 for 2 turns."; case Effect::HoldLineShield: return "Applies a 60 HP Shield."; case Effect::PrecisionStrikeDebuff: return "Reduces target's DEF by 15 and BIQ by 10 for 3 turns."; case Effect::StaminaStrip: return "Halves target's Stamina Regeneration for 2 turns."; case Effect::P2BasicDebuff: return "Phase 2 Enhanced Basic Attack."; case Effect::ClutchGrab: return "Grabs target, preventing escape."; case Effect::LightsOutStun: return "Stuns the target for 1 turn."; default: return "Unknown effect."; } }
 
 std::string getActorName(ActorID id) {
     switch(id) {
@@ -51,7 +50,7 @@ bool DrawMenuButton(Rectangle rect, const char* text, Color baseColor, bool disa
     return false;
 }
 
-void DrawDetailsOverlay(bool& showFlag, int type, Move m, std::string tuName, PassiveID pID, ActiveID aID, std::vector<TeamUpSkill>& masterTeamUps) {
+void DrawDetailsOverlay(bool& showFlag, int type, Move m, std::string tuName, PassiveID pID, ActiveID aID, NaturalID nID, std::vector<TeamUpSkill>& masterTeamUps) {
     DrawRectangle(0, 0, 1920, 1080, Fade(BLACK, 0.95f));
     DrawRectangle(500, 300, 920, 480, DARKGRAY); DrawRectangleLinesEx({500, 300, 920, 480}, 4, WHITE);
     
@@ -75,6 +74,13 @@ void DrawDetailsOverlay(bool& showFlag, int type, Move m, std::string tuName, Pa
     else if (type == 3) { DrawText(getPassiveName(pID).c_str(), 550, 350, 50, GOLD); DrawText("TYPE: PASSIVE", 550, 420, 30, LIGHTGRAY); DrawText("EFFECT:", 550, 490, 25, SKYBLUE); DrawText(getPassiveDescription(pID).c_str(), 550, 530, 25, WHITE); }
     else if (type == 4) { DrawText(getActiveName(aID).c_str(), 550, 350, 50, GOLD); DrawText("TYPE: ACTIVE", 550, 420, 30, LIGHTGRAY); DrawText("EFFECT:", 550, 490, 25, ORANGE); DrawText(getActiveDescription(aID).c_str(), 550, 530, 25, WHITE); }
     
+    else if (type == 7) { 
+        DrawText(getNaturalName(nID).c_str(), 550, 350, 50, GOLD); 
+        DrawText("TYPE: NATURAL", 550, 420, 30, LIGHTGRAY); 
+        DrawText("EFFECT:", 550, 490, 25, SKYBLUE); 
+        DrawText(getNaturalDescription(nID).c_str(), 550, 530, 25, WHITE); 
+    }
+
     if (DrawMenuButton({550, 800, 300, 60}, "Close Info [B]", MAROON, false) || IsKeyReleased(KEY_B)) showFlag = false; 
 }
 
@@ -83,20 +89,23 @@ int main() {
 
     // --- NEW: LOAD TEXTURES ---
     Texture2D texBrian = LoadTexture("Brian.png");
-    Texture2D texPaul = LoadTexture("Paul.png");
+    Texture2D texPaulIdle = LoadTexture("P_RightFaceRightLight.png");
+    Texture2D texPaulPunch = LoadTexture("P_RightPunchRightLight.png");
     Texture2D texVince = LoadTexture("Vince.png");
     Texture2D texJoe = LoadTexture("Joe.png");
     Texture2D texJustin = LoadTexture("Justin.png");
     
     // Set to Point filtering so the pixel art doesn't blur when stretched
     SetTextureFilter(texBrian, TEXTURE_FILTER_POINT);
-    SetTextureFilter(texPaul, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texPaulIdle, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texPaulPunch, TEXTURE_FILTER_POINT);
     SetTextureFilter(texVince, TEXTURE_FILTER_POINT);
     SetTextureFilter(texJoe, TEXTURE_FILTER_POINT);
     SetTextureFilter(texJustin, TEXTURE_FILTER_POINT);
 
     globalSprites[ActorID::Brian] = texBrian;
-    globalSprites[ActorID::Paul] = texPaul;
+    globalSprites[ActorID::Paul] = texPaulIdle;
+    globalAttackSprites[ActorID::Paul] = texPaulPunch;
     globalSprites[ActorID::Vince] = texVince;
     globalSprites[ActorID::Joe] = texJoe;
     globalSprites[ActorID::Justin] = texJustin;
@@ -106,16 +115,16 @@ int main() {
     std::vector<Entity*> reserves(3, nullptr);
     std::vector<Entity*> bench;
     
-    activeParty[0] = new Entity(buildYoungBrian());
-    activeParty[1] = new Entity(buildYoungPaul());
-    activeParty[2] = new Entity(buildYoungVince());
+    activeParty[0] = new Entity(buildBrian());
+    activeParty[1] = new Entity(buildPaul());
+    activeParty[2] = new Entity(buildVince());
 
     reserves[0] = new Entity(buildYoungJoe());
     reserves[1] = new Entity(buildYoungJustin());
     
-    bench.push_back(new Entity(buildBrian()));
-    bench.push_back(new Entity(buildPaul()));
-    bench.push_back(new Entity(buildVince()));
+    bench.push_back(new Entity(buildYoungBrian()));
+    bench.push_back(new Entity(buildYoungPaul()));
+    bench.push_back(new Entity(buildYoungVince()));
 
     int swapGroup = -1; 
     int swapIndex = -1;
@@ -130,6 +139,7 @@ int main() {
     int detailsType = 0; 
     Move detailedMove; 
     std::string detailedTeamUpName = ""; 
+    NaturalID detailedNatural = NaturalID::None;
     PassiveID detailedPassive = PassiveID::None;
     ActiveID detailedActive = ActiveID::None;
 
@@ -163,7 +173,7 @@ int main() {
             
             DrawText("THE CREW", 1920/2 - MeasureText("THE CREW", 80)/2, 200, 80, RED);
             // ---> NEW: Version Subtitle <---
-            DrawText("v1.1 Pre-Alpha", 1920/2 - MeasureText("v1.1 Pre-Alpha", 30)/2, 290, 30, GRAY);
+            DrawText("v1.2 Pre-Alpha", 1920/2 - MeasureText("v1.2 Pre-Alpha", 30)/2, 290, 30, GRAY);
             
             bool hasSave = SaveSystem::DoesSaveExist(); int startX = 1920/2 - 200;
             if (hasSave) {
@@ -311,25 +321,42 @@ int main() {
 
             // 1. Profile Photo (Top Left next to name)
             if (globalSprites.count(selectedCharForCustomization->actorID)) {
+                Texture2D tex = globalSprites[selectedCharForCustomization->actorID];
+                
                 int textWidth = MeasureText(TextFormat("CUSTOMIZING: %s", selectedCharForCustomization->name.c_str()), 50);
                 Rectangle profileDest = { (float)(100 + textWidth + 20), 20, 60, 60 };
-                Rectangle sourceCrop = {0, 0, 7, 7}; // Top half of the sprite
-                DrawTexturePro(globalSprites[selectedCharForCustomization->actorID], sourceCrop, profileDest, {0,0}, 0.0f, WHITE);
+                
+                // ---> THE FIX: Dynamic square crop <---
+                Rectangle sourceCrop = {0, 0, (float)tex.width, (float)tex.width}; 
+                
+                DrawTexturePro(tex, sourceCrop, profileDest, {0,0}, 0.0f, WHITE);
                 DrawRectangleLinesEx(profileDest, 2, WHITE);
             }
 
-            // 2. Full Body Picture & Backstory (Bottom Middle/Right)
+            // 2. Full Body Picture, Backstory & Natural Ability (Bottom Middle/Right)
             if (globalSprites.count(selectedCharForCustomization->actorID)) {
-                Rectangle fullDest = { 950, 650, 140, 300 }; 
+                Texture2D tex = globalSprites[selectedCharForCustomization->actorID];
                 
-                // ---> NEW: Draw the DARKBLUE background box first
-                Rectangle boxDest = { 930, 630, 180, 340 }; 
+                Rectangle boxDest = { 930, 550, 180, 340 }; 
                 DrawRectangleRec(boxDest, DARKBLUE);
                 DrawRectangleLinesEx(boxDest, 2, WHITE);
                 
-                // Then draw the character sprite on top
-                Rectangle fullSource = {0, 0, 7, 15}; 
-                DrawTexturePro(globalSprites[selectedCharForCustomization->actorID], fullSource, fullDest, {0,0}, 0.0f, WHITE);
+                Rectangle fullSource = {0, 0, (float)tex.width, (float)tex.height}; 
+                
+                // ---> THE FIX: Calculate the scale to fit comfortably inside the 340px tall box! <---
+                float scale = 260.0f / tex.height; // Forces the sprite to be exactly 260 pixels tall
+                float scaledWidth = tex.width * scale;
+                float scaledHeight = tex.height * scale;
+                
+                // Automatically center the scaled sprite inside the blue box
+                Rectangle fullDest = { 
+                    boxDest.x + (boxDest.width / 2) - (scaledWidth / 2), 
+                    boxDest.y + (boxDest.height / 2) - (scaledHeight / 2), 
+                    scaledWidth, 
+                    scaledHeight 
+                };
+                
+                DrawTexturePro(tex, fullSource, fullDest, {0,0}, 0.0f, WHITE);
 
                 std::string backstory = "A determined fighter trying to make a name in the streets.";
                 if (selectedCharForCustomization->actorID == ActorID::Brian) backstory = "A natural talent who relies heavily on his sharp instincts.";
@@ -338,8 +365,34 @@ int main() {
                 else if (selectedCharForCustomization->actorID == ActorID::Joe) backstory = "YoOOOooo.";
                 else if (selectedCharForCustomization->actorID == ActorID::Justin) backstory = "Your Favorite country white boy.";
                 
-                DrawText("CHARACTER BACKGROUND:", 1120, 750, 25, GOLD);
-                DrawText(backstory.c_str(), 1120, 790, 20, LIGHTGRAY);
+                // Shifted backstory up
+                DrawText("CHARACTER BACKGROUND:", 1120, 670, 25, GOLD);
+                DrawText(backstory.c_str(), 1120, 710, 20, LIGHTGRAY);
+                
+                // NEW: Natural Ability Text rendered directly below the backstory
+                if (selectedCharForCustomization->naturalAbility != NaturalID::None) {
+                    DrawText("NATURAL ABILITY:", 1120, 810, 25, GREEN);
+                    DrawText(getNaturalName(selectedCharForCustomization->naturalAbility).c_str(), 1120, 850, 22, GOLD);
+                    
+                    // Word wrap helper to keep the description inside the boundary
+                    auto wrapText = [](const std::string& text, int maxChars) {
+                        std::string wrapped = text;
+                        int lastSpace = -1;
+                        int lineStart = 0;
+                        for (int i = 0; i < wrapped.length(); i++) {
+                            if (wrapped[i] == ' ') lastSpace = i;
+                            if (i - lineStart >= maxChars && lastSpace != -1) {
+                                wrapped[lastSpace] = '\n';
+                                lineStart = lastSpace + 1;
+                                lastSpace = -1;
+                            }
+                        }
+                        return wrapped;
+                    };
+                    
+                    std::string natDesc = wrapText(getNaturalDescription(selectedCharForCustomization->naturalAbility), 50);
+                    DrawText(natDesc.c_str(), 1120, 880, 18, LIGHTGRAY);
+                }
             }
             
             // --- NEW: QUICK LEVEL ADJUSTMENT FOR YOUNG CHARACTERS ---
@@ -413,9 +466,9 @@ int main() {
             int displayBIQ = selectedCharForCustomization->baseBIQ;
             int displaySIQ = selectedCharForCustomization->baseSIQ;
             
-            // Spoof the stats to match toggleStance() if we are viewing the Alt Stance
-            if (selectedCharForCustomization->naturalAbility == PassiveID::ScrewDat && editingAltStance) {
-                displayBIQ = selectedCharForCustomization->baseSIQ; // <--- Now equals your actual base SIQ instead of 90!
+            // Read his actual stance to spoof the stats!
+            if (selectedCharForCustomization->naturalAbility == NaturalID::ScrewDat && selectedCharForCustomization->isAltStance) {
+                displayBIQ = selectedCharForCustomization->baseSIQ; 
                 displaySIQ = 0;
             }
             
@@ -429,19 +482,20 @@ int main() {
 
             // --- NEW: Stance Toggle Logic ---
             if (selectedCharForCustomization->actorID == ActorID::Brian) {
-                DrawText(editingAltStance ? "ALT MOVESET (STRIKE):" : "MOVESET (SUPPORT):", 100, 150, 30, GREEN);
-                
-                // Pushed from X:440 to X:520 to give the text more breathing room, widened button slightly
-                if (DrawMenuButton({520, 145, 130, 40}, editingAltStance ? "-> SUPPORT" : "-> STRIKE", DARKGRAY, bgDisabled)) {
-                    editingAltStance = !editingAltStance;
+                DrawText(selectedCharForCustomization->isAltStance ? "CURRENT MOVESET (STRIKE):" : "CURRENT MOVESET (SUPPORT):", 100, 150, 30, GREEN);
+                                 
+                if (DrawMenuButton({520, 145, 130, 40}, selectedCharForCustomization->isAltStance ? "-> SUPPORT" : "-> STRIKE", DARKGRAY, bgDisabled)) {
+                    // This instantly changes his stats and swaps his arrays!
+                    selectedCharForCustomization->toggleStance();
                 }
             } else {
                 DrawText("CURRENT MOVESET:", 100, 150, 30, GREEN);
             }
-
             int yOffset = 200;
-            // Tell the engine which array to look at and edit!
-            std::vector<Move>& activeEditMenu = editingAltStance ? selectedCharForCustomization->altCombatMenu : selectedCharForCustomization->combatMenu;
+            
+            // Because toggleStance() swapped the arrays in the engine, 
+            // we ALWAYS just edit the main combatMenu. No complex logic needed!
+            std::vector<Move>& activeEditMenu = selectedCharForCustomization->combatMenu;
 
             for (int i = 0; i < activeEditMenu.size(); i++) {
                 Rectangle btn = { 100.0f, (float)yOffset, 450.0f, 50.0f };
@@ -460,13 +514,7 @@ int main() {
 
             DrawText(TextFormat("PASSIVE ABILITIES (%d/3 MAX):", totalAbilitiesEquipped), 650, 150, 30, SKYBLUE);
             yOffset = 200;
-            if (selectedCharForCustomization->naturalAbility != PassiveID::None) {
-                Rectangle natBtn = {650, (float)yOffset, 450, 50};
-                DrawRectangleRec(natBtn, Fade(GOLD, 0.2f)); DrawRectangleLinesEx(natBtn, 2, GOLD);
-                DrawText(TextFormat("[Natural] %s", getPassiveName(selectedCharForCustomization->naturalAbility).c_str()), 670, yOffset + 15, 20, GOLD);
-                if (CheckCollisionPointRec(GetMousePosition(), natBtn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !bgDisabled) { detailedPassive = selectedCharForCustomization->naturalAbility; detailsType = 3; showDetailsPopup = true; }
-                yOffset += 60;
-            }
+
             for (int i = 0; i < selectedCharForCustomization->passiveAbilities.size(); i++) {
                 Rectangle pBtn = { 650.0f, (float)yOffset, 450.0f, 50.0f };
                 if (DrawMenuButton(pBtn, getPassiveName(selectedCharForCustomization->passiveAbilities[i]).c_str(), DARKGRAY, bgDisabled)) { customSlotType = 2; customSlotIndex = i; showCustomSelect = true; }
@@ -543,9 +591,10 @@ int main() {
                 if (customSlotType == 1) { 
                     Rectangle unequipBtn = { 100.0f, (float)gridY, 350.0f, 50.0f };
                     if (DrawMenuButton(unequipBtn, "--> UNEQUIP <--", MAROON, listDisabled)) {
-                        std::vector<Move>& targetMenu = editingAltStance ? selectedCharForCustomization->altCombatMenu : selectedCharForCustomization->combatMenu;
+                        // ALWAYS edit the main combatMenu
+                        std::vector<Move>& targetMenu = selectedCharForCustomization->combatMenu;
                         if (targetMenu.size() > 1) targetMenu.erase(targetMenu.begin() + customSlotIndex);
-                        showCustomSelect = false; customScrollY = 0; // Reset scroll
+                        showCustomSelect = false; customScrollY = 0; 
                     }
                     gridY += 70; 
 
@@ -557,15 +606,16 @@ int main() {
                         
                         for (int i = 1; i < poolMoves.size(); i++) { 
                             MoveID mID = poolMoves[i];
-                            Move m = getMove(mID);
+                            const Move& m = getMove(mID);
                             
                             if (m.category == cat) {
                                 Rectangle btn = { (float)gridX, (float)gridY, 350.0f, 50.0f };
                                 
                                 if (DrawMenuButton(btn, m.name.c_str(), DARKGRAY, listDisabled)) {
-                                    std::vector<Move>& targetMenu = editingAltStance ? selectedCharForCustomization->altCombatMenu : selectedCharForCustomization->combatMenu;
+                                    // ALWAYS edit the main combatMenu
+                                    std::vector<Move>& targetMenu = selectedCharForCustomization->combatMenu;
                                     targetMenu[customSlotIndex] = getMove(mID);
-                                    showCustomSelect = false; customScrollY = 0; // Reset scroll
+                                    showCustomSelect = false; customScrollY = 0; 
                                 }
                                 if (CheckCollisionPointRec(GetMousePosition(), btn) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !listDisabled) {
                                     detailedMove = getMove(mID); detailsType = 1; showDetailsPopup = true;
@@ -620,7 +670,7 @@ int main() {
                     customScrollY = 0; // Reset scroll
                 }
             }
-            if (showDetailsPopup) DrawDetailsOverlay(showDetailsPopup, detailsType, detailedMove, detailedTeamUpName, detailedPassive, detailedActive, masterTeamUps);
+            if (showDetailsPopup) DrawDetailsOverlay(showDetailsPopup, detailsType, detailedMove, detailedTeamUpName, detailedPassive, detailedActive, detailedNatural, masterTeamUps);
             EndDrawing();
         }
         else if (currentScreen == ENCYCLOPEDIA) {
@@ -634,7 +684,10 @@ int main() {
             if (DrawMenuButton({100, 240, 300, 60}, "2. Passives", (activeTab == 1) ? GOLD : GRAY, bgDisabled)) { activeTab = 1; scrollY = 0; }
             if (DrawMenuButton({100, 320, 300, 60}, "3. Actives", (activeTab == 2) ? GOLD : GRAY, bgDisabled)) { activeTab = 2; scrollY = 0; }
             if (DrawMenuButton({100, 400, 300, 60}, "4. Team-Ups", (activeTab == 3) ? GOLD : GRAY, bgDisabled)) { activeTab = 3; scrollY = 0; }
-            if (DrawMenuButton({100, 900, 300, 60}, "5. Back to Hub [B]", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyReleased(KEY_B))) { currentScreen = HUB; scrollY = 0; }
+            // ADDED THE NATURALS TAB
+            if (DrawMenuButton({100, 480, 300, 60}, "5. Naturals", (activeTab == 4) ? GOLD : GRAY, bgDisabled)) { activeTab = 4; scrollY = 0; }
+            // SHIFTED THIS TO #6
+            if (DrawMenuButton({100, 900, 300, 60}, "6. Back to Hub [B]", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyReleased(KEY_B))) { currentScreen = HUB; scrollY = 0; }
 
             DrawRectangle(450, 150, 1400, 800, Fade(BLACK, 0.8f)); DrawRectangleLines(450, 150, 1400, 800, WHITE);
 
@@ -658,6 +711,10 @@ int main() {
                 for (TeamUpSkill tu : masterTeamUps) if (tu.requiredMembers.size() == 3) totalContentHeight += 80;
                 totalContentHeight += 100;
                 for (TeamUpSkill tu : masterTeamUps) if (tu.requiredMembers.size() == 2) totalContentHeight += 80;
+            } 
+            // ADD THIS ELSE IF BLOCK:
+            else if (activeTab == 4) {
+                totalContentHeight = 60 + (MASTER_NATURAL_POOL.size() - 1) * 80;
             }
 
             int maxScroll = 0;
@@ -686,7 +743,7 @@ int main() {
                     DrawText(getCategoryName(cat).c_str(), 480, yPos, 40, SKYBLUE); yPos += 60;
                     
                     for (int i = 1; i < poolMoves.size(); i++) {
-                        Move m = getMove(poolMoves[i]);
+                        const Move& m = getMove(poolMoves[i]);
                         if (m.category == cat) {
                             if (DrawMenuButton({ 480.0f, (float)yPos, 550.0f, 50.0f }, m.name.c_str(), DARKGRAY, listDisabled)) { 
                                 detailedMove = m; detailsType = 1; showDetailsPopup = true; 
@@ -737,10 +794,21 @@ int main() {
                         DrawText(reqs.c_str(), 1100, yPos + 20, 25, SKYBLUE); yPos += 80;
                     }
                 }
+            } // <--- This closes the `else if (activeTab == 3)` block
+            else if (activeTab == 4) {
+                int yPos = 180 + scrollY;
+                for (int i = 1; i < MASTER_NATURAL_POOL.size(); i++) { 
+                    NaturalID nID = MASTER_NATURAL_POOL[i];
+                    DrawText(getNaturalName(nID).c_str(), 480, yPos, 25, GREEN); 
+                    DrawText(getNaturalDescription(nID).c_str(), 480, yPos + 30, 20, LIGHTGRAY); yPos += 80; 
+                }
             }
             EndScissorMode(); // Stop clipping
+
             
-            if (showDetailsPopup) DrawDetailsOverlay(showDetailsPopup, detailsType, detailedMove, detailedTeamUpName, detailedPassive, detailedActive, masterTeamUps);
+            EndScissorMode(); // Stop clipping
+            
+            if (showDetailsPopup) DrawDetailsOverlay(showDetailsPopup, detailsType, detailedMove, detailedTeamUpName, detailedPassive, detailedActive, detailedNatural, masterTeamUps);
             EndDrawing();
         }
         else if (currentScreen == BATTLE) {
@@ -782,14 +850,24 @@ int main() {
                 activeParty[i] = fightParty[i];
             }
             
-            // ---> NEW: Re-sync Reserves to guarantee 3 slots <---
             reserves.resize(3, nullptr);
             
+            // ---> NEW: PLUG THE MEMORY LEAK! <---
+            // Delete the enemies from RAM, then clear the pointer list.
+            for (Entity* enemy : enemyTeam) {
+                if (enemy != nullptr) {
+                    delete enemy;
+                }
+            }
+            enemyTeam.clear();
+            // ------------------------------------
+
             currentScreen = HUB;
         }
     }
     UnloadTexture(texBrian);
-    UnloadTexture(texPaul);
+    UnloadTexture(texPaulIdle);
+    UnloadTexture(texPaulPunch);
     UnloadTexture(texVince);
     UnloadTexture(texJoe);
     UnloadTexture(texJustin);

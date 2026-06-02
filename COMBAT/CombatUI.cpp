@@ -3,13 +3,17 @@
 #include "AbilityDatabase.h"
 #include "MoveDatabase.h" 
 #include "../Systems/Logger.h" 
+#include "../CORE/GlobalConstants.h"
 #include "raylib.h" 
 #include <string> 
 #include <algorithm>
 #include <map> // <--- Ensure this is here!
 
-// <--- Add the extern promise here!
-extern std::map<ActorID, Texture2D> globalSprites; 
+#include <map> 
+
+extern std::map<ActorID, Texture2D> globalSprites;
+// ---> ADD THIS NEW MAP <---
+extern std::map<ActorID, Texture2D> globalAttackSprites; 
 
 // --- ANIMATION TRACKERS ---
 Entity* animAttacker = nullptr;
@@ -31,42 +35,6 @@ Vector2 GetBasePos(Entity* e, std::vector<Entity*>& pTeam, std::vector<Entity*>&
         if (eTeam[i] == e) return ePos[i];
     }
     return {0, 0};
-}
-
-static std::string getTargetText(MoveTarget t) {
-    switch(t) {
-        case MoveTarget::Self: return "Self";
-        case MoveTarget::OneEnemy: return "1 Enemy";
-        case MoveTarget::TwoEnemies: return "2 Enemies";
-        case MoveTarget::AllEnemies: return "All Enemies";
-        case MoveTarget::OneAlly: return "1 Ally";
-        case MoveTarget::TwoAllies: return "2 Allies";
-        case MoveTarget::AllAllies: return "All Allies";
-        default: return "Unknown";
-    }
-}
-
-static std::string getEffectText(Effect e) {
-    switch(e) {
-        case Effect::None: return "No special effect.";
-        case Effect::RestoreStamina: return "Restores 25 Stamina.";
-        case Effect::DefenseScalingDamage: return "Uses user's Defense stat to calculate damage.";
-        case Effect::ApplyBleed: return "Applies Bleed (5 DMG/turn) for 3 turns.";
-        case Effect::IgnoreDefense: return "Ignores 50% of the target's Defense.";
-        case Effect::DefenseBuff40: return "Increases Defense by 40% and adds 1 Hit Nullification.";
-        case Effect::HealAndCleanse: return "Heals 40% HP and cures all status conditions.";
-        case Effect::LowerPriority: return "Reduces target's Speed by 15 for 2 turns.";
-        case Effect::StrikeDefenseDebuff: return "Reduces target's Defense by 40% for 2 turns.";
-        case Effect::StrikeUlt: return "Guaranteed Hit & Crit. Consumes stacks for massive damage.";
-        case Effect::SlowEnemy: return "Reduces target's Speed by 20 for 2 turns.";
-        case Effect::HoldLineShield: return "Applies a Shield.";
-        case Effect::PrecisionStrikeDebuff: return "Reduces target's DEF by 15 and BIQ by 10 for 3 turns.";
-        case Effect::StaminaStrip: return "Halves target's Stamina Regeneration for 2 turns.";
-        case Effect::P2BasicDebuff: return "Phase 2 Enhanced Basic Attack.";
-        case Effect::ClutchGrab: return "Grabs target, preventing escape.";
-        case Effect::LightsOutStun: return "Stuns the target for 1 turn.";
-        default: return "Unknown effect.";
-    }
 }
 
 bool DrawGUIButton(Rectangle rect, const char* text, int hotkey, bool disabled = false) {
@@ -102,9 +70,12 @@ void DrawBattleOverlay(std::vector<Entity*>& playerTeam, std::vector<Entity*>& e
         // Profile Picture
         Rectangle profileRect = { 50, (float)uiY, 80, 80 };
         if (globalSprites.count(p->actorID)) {
-            // Source cuts the 7x15 texture exactly in half to grab the top 7 pixels (Face/Shoulders)
-            Rectangle sourceCrop = {0, 0, 7, 7}; 
-            DrawTexturePro(globalSprites[p->actorID], sourceCrop, profileRect, {0,0}, 0.0f, p->isAlive ? WHITE : DARKGRAY);
+            Texture2D tex = globalSprites[p->actorID];
+            
+            // ---> THE FIX: Use the texture's width to grab a perfect square from the top! <---
+            Rectangle sourceCrop = {0, 0, (float)tex.width, (float)tex.width}; 
+            
+            DrawTexturePro(tex, sourceCrop, profileRect, {0,0}, 0.0f, p->isAlive ? WHITE : DARKGRAY);
             DrawRectangleLinesEx(profileRect, 2, WHITE);
         } else {
             // Fallback for characters without sprites
@@ -144,134 +115,198 @@ void DrawBattleOverlay(std::vector<Entity*>& playerTeam, std::vector<Entity*>& e
         float stamPercent = (float)p->currentStamina / p->maxStamina;
         DrawRectangle(150, uiY + 85, stamPercent * 200, 15, YELLOW);
 
-        // Status Icons (Text Placeholders)
+        // --- NEW: STACKED STATUS ICONS ---
         int statX = 370;
         int statY = uiY + 20;
+        
+        std::map<std::string, int> statusCounts;
+        std::map<std::string, Color> statusColors;
+        std::vector<std::string> displayOrder; 
+
         for (auto& s : p->activeStatuses) {
-            std::string statStr = "UP"; Color statCol = GREEN;
-            if (s.value < 0) { statStr = "DOWN"; statCol = RED; } // <--- Changed from DN to DOWN
+            std::string label = ""; Color statCol = WHITE;
             
-            std::string label = "";
-            if (s.type == StatusType::StatModifier) {
+            if (s.category == StatusCategory::Buff || s.category == StatusCategory::Debuff) {
+                std::string statStr = (s.statModifier > 0) ? "UP" : "DOWN";
+                statCol = (s.statModifier > 0) ? GREEN : RED;
+                
                 if (s.targetStat == StatName::ATK) label = "ATK " + statStr;
-                if (s.targetStat == StatName::DEF) label = "DEF " + statStr;
-                if (s.targetStat == StatName::SPD) label = "SPD " + statStr;
-                if (s.targetStat == StatName::BIQ) label = "BIQ " + statStr;
-                if (s.targetStat == StatName::SIQ) label = "SIQ " + statStr;
-            } else if (s.type == StatusType::Bleed) label = "BLEED";
-            else if (s.type == StatusType::Stun) label = "STUN";
-            else if (s.type == StatusType::Taunt) label = "TAUNT";
+                else if (s.targetStat == StatName::DEF) label = "DEF " + statStr;
+                else if (s.targetStat == StatName::SPD) label = "SPD " + statStr;
+                else if (s.targetStat == StatName::BIQ) label = "BIQ " + statStr;
+                else if (s.targetStat == StatName::SIQ) label = "SIQ " + statStr;
+            } else {
+                label = s.name; statCol = RED;
+            }
 
             if (label != "") {
-                DrawText(label.c_str(), statX, statY, 15, statCol);
-                statY += 20;
-                if (statY > uiY + 80) { statY = uiY + 20; statX += 60; }
+                if (statusCounts[label] == 0) {
+                    displayOrder.push_back(label);
+                    statusColors[label] = statCol;
+                }
+                statusCounts[label]++;
             }
+        }
+
+        // Draw the grouped statuses
+        for (const std::string& label : displayOrder) {
+            std::string finalText = label;
+            if (statusCounts[label] > 1) finalText += " x" + std::to_string(statusCounts[label]);
+                         
+            DrawText(finalText.c_str(), statX, statY, 15, statusColors[label]);
+            statY += 20;
+            
+            // ---> THE FIX: Increase statX shift from 60 to 100 <---
+            if (statY > uiY + 80) { statY = uiY + 20; statX += 100; } 
         }
         uiY += 120;
     }
 
     // 3. Scrollable Combat Log (Right Side)
     static int combatLogScrollY = 0;
-    Rectangle logRec = { 1300, 600, 620, 480 };
+    static int lastLogCount = 0; 
+         
+    Rectangle logRec = { 1200, 600, 720, 480 }; 
     DrawRectangleRec(logRec, Fade(BLACK, 0.5f));
     DrawRectangleLinesEx(logRec, 2, WHITE);
-    DrawText("COMBAT LOG", 1320, 620, 25, LIGHTGRAY);
-    
+    DrawText("COMBAT LOG", 1220, 620, 25, LIGHTGRAY);
+         
     std::vector<std::string> logs = GameLog::GetMessages(); 
-    
-    // ---> NEW: Dynamic Bound Clamping
-    int totalLogHeight = logs.size() * 30; // Each line is 30 pixels
+    int totalLogHeight = logs.size() * 30; 
     int maxScroll = 0;
     if (totalLogHeight > 410) { 
-        maxScroll = -(totalLogHeight - 410); // Calculates exactly how far down the log can go
+         maxScroll = -(totalLogHeight - 410); 
     }
+         
+    // --- THE FIX: BULLETPROOF AUTO-SCROLL ---
+    int currentTotalLogs = GameLog::GetTotalMessagesLogged();
     
-    // Automatically clamp the scroll value. If a new battle starts and the log shrinks, 
-    // maxScroll becomes 0, and the old negative scroll value snaps right back to the top!
+    // If the log was cleared for a new battle, reset our UI tracker!
+    if (currentTotalLogs < lastLogCount) {
+        lastLogCount = currentTotalLogs;
+    }
+
+    // If a new message was added, instantly snap the view to the bottom
+    if (currentTotalLogs > lastLogCount) {
+        combatLogScrollY = maxScroll;
+        lastLogCount = currentTotalLogs;
+    }
+    // ----------------------------------------
+         
     if (combatLogScrollY < maxScroll) combatLogScrollY = maxScroll;
     if (combatLogScrollY > 0) combatLogScrollY = 0;
-
-    // Scrolling logic
+    
+    // Manual scrolling still works!
     if (CheckCollisionPointRec(GetMousePosition(), logRec)) {
         combatLogScrollY += GetMouseWheelMove() * 30;
         if (combatLogScrollY > 0) combatLogScrollY = 0;
         if (combatLogScrollY < maxScroll) combatLogScrollY = maxScroll;
     }
-
-    BeginScissorMode(1300, 660, 620, 410);
+    
+    // WIDENED SCISSOR MODE TO MATCH
+    BeginScissorMode(1200, 660, 720, 410);
     int logY = 670 + combatLogScrollY;
     for (std::string& msg : logs) { 
-        DrawText(msg.c_str(), 1320, logY, 20, WHITE); 
-        logY += 30; 
-    }
+         DrawText(msg.c_str(), 1220, logY, 20, WHITE); 
+         logY += 30; 
+     }
     EndScissorMode();
 
     // 4. Draw Sprites in V-Formation
     for (Entity* p : playerTeam) {
         if (!p->isAlive && p != animDying && p != animTarget) continue;
-        
+                 
         Color tint = WHITE; Color textColor = WHITE;
         if (p == animDying) { 
             float a = deathFadeAlpha / 255.0f;
             tint = Fade(WHITE, a); textColor = Fade(textColor, a); 
         }
-        
+                 
         Vector2 drawPos = GetBasePos(p, playerTeam, enemyTeam);
         if (p == animAttacker) drawPos = animAttackerPos;
         if (p == animTarget) { drawPos.x += animTargetOffset.x; drawPos.y += animTargetOffset.y; }
-        
-        // NEW SIZE: 70x150
-        Rectangle destRect = {drawPos.x, drawPos.y, 70, 150};
-        if (globalSprites.count(p->actorID)) {
-            Rectangle fullSource = {0, 0, 7, 15};
-            DrawTexturePro(globalSprites[p->actorID], fullSource, destRect, {0,0}, 0.0f, tint);
+                 
+        float targetScreenHeight = 150.0f; // Adjusts everyones height
+
+        // --- DRAWING MATH ---
+        float pixelScale = GameConfig::PLAYER_SCALE;
+
+        if (globalSprites.count(p->actorID)) { 
+            Texture2D activeTexture = globalSprites[p->actorID];
+            if (p == animAttacker && globalAttackSprites.count(p->actorID)) {
+                activeTexture = globalAttackSprites[p->actorID];
+            }
+            
+            float scaledWidth = activeTexture.width * pixelScale;
+            float scaledHeight = activeTexture.height * pixelScale;
+            Rectangle fullSource = {0, 0, (float)activeTexture.width, (float)activeTexture.height};
+            
+            // Bottom-aligned to the 150px baseline
+            Rectangle destRect = { drawPos.x, drawPos.y + (150.0f - scaledHeight), scaledWidth, scaledHeight };
+            DrawTexturePro(activeTexture, fullSource, destRect, {0,0}, 0.0f, tint);
         } else {
-            DrawRectangle(destRect.x, destRect.y, destRect.width, destRect.height, BLUE); 
+            // Fallback dynamically matches what a 40x40 sprite would look like
+            float fallbackSize = 40.0f * pixelScale;
+            DrawRectangle((int)drawPos.x, (int)(drawPos.y + (150.0f - fallbackSize)), fallbackSize/2, fallbackSize, BLUE); 
         }
-        
-        // X shifted to -10 to center the name over the thinner 70px sprite
+                 
+        // X shifted to -10 to center the name over the thinner sprite
         DrawText(p->name.c_str(), drawPos.x - 10, drawPos.y - 30, 25, textColor);
     }
     
     for (Entity* e : enemyTeam) {
         if (!e->isAlive && e != animDying && e != animTarget) continue;
-        
+                 
         Color hpColor = RED; Color bodyColor = RED; Color textColor = WHITE; Color barBgColor = BLACK;
-        Color tint = WHITE; // <--- ADDED THIS HERE!
-        
+        Color tint = WHITE; 
+                 
         if (e == animDying) { 
             float a = deathFadeAlpha / 255.0f;
             hpColor = Fade(hpColor, a); bodyColor = Fade(bodyColor, a);
             textColor = Fade(textColor, a); barBgColor = Fade(barBgColor, a);
-            tint = Fade(WHITE, a); // <--- FADES THE SPRITE WHEN DYING
+            tint = Fade(WHITE, a); 
         }
-        
+                 
         Vector2 drawPos = GetBasePos(e, playerTeam, enemyTeam);
         if (e == animAttacker) drawPos = animAttackerPos;
         if (e == animTarget) { drawPos.x += animTargetOffset.x; drawPos.y += animTargetOffset.y; }
-        
-        // NEW SIZE: 70x150
-        Rectangle destRect = {drawPos.x, drawPos.y, 70, 150};
-        if (globalSprites.count(e->actorID)) {
-            Rectangle fullSource = {0, 0, 7, 15};
-            DrawTexturePro(globalSprites[e->actorID], fullSource, destRect, {0,0}, 0.0f, tint); // Now it knows what tint is!
+                 
+        float targetScreenHeight = 150.0f; // Adjusts everyones height
+
+        // --- DRAWING MATH ---
+        float pixelScale = GameConfig::ENEMY_SCALE;
+
+        if (globalSprites.count(e->actorID)) { 
+            Texture2D activeTexture = globalSprites[e->actorID];
+            if (e == animAttacker && globalAttackSprites.count(e->actorID)) {
+                activeTexture = globalAttackSprites[e->actorID];
+            }
+            
+            float scaledWidth = activeTexture.width * pixelScale;
+            float scaledHeight = activeTexture.height * pixelScale;
+            Rectangle fullSource = {0, 0, (float)activeTexture.width, (float)activeTexture.height};
+            
+            // Bottom-aligned to the 150px baseline
+            Rectangle destRect = { drawPos.x, drawPos.y + (150.0f - scaledHeight), scaledWidth, scaledHeight };
+            DrawTexturePro(activeTexture, fullSource, destRect, {0,0}, 0.0f, tint);
         } else {
-            DrawRectangle(destRect.x, destRect.y, destRect.width, destRect.height, bodyColor); 
+            // Fallback dynamically matches what a 40x40 sprite would look like
+            float fallbackSize = 40.0f * pixelScale;
+            DrawRectangle((int)drawPos.x, (int)(drawPos.y + (150.0f - fallbackSize)), fallbackSize/2, fallbackSize, RED); 
         }
-        
-        // X shifted to -10 to center the name over the thinner 70px sprite
+                 
+        // X shifted to -10 to center the name over the thinner sprite
         DrawText(e->name.c_str(), drawPos.x - 10, drawPos.y - 30, 25, textColor);
-        
-        // Enemy HP and Shield Bars centered under the 70px sprite
+                 
+        // Enemy HP and Shield Bars centered under the sprite
         if (e->shieldHP > 0) {
             int shieldWidth = (e->shieldHP * 140) / e->maxHP;
             if (shieldWidth > 140) shieldWidth = 140; 
             DrawRectangle(drawPos.x - 35, drawPos.y + 155, 140, 10, barBgColor);
             DrawRectangle(drawPos.x - 35, drawPos.y + 155, shieldWidth, 10, SKYBLUE);
         }
-        
-        // HP Bar and Fraction Text centered under the 70px sprite
+                 
+        // HP Bar and Fraction Text centered under the sprite
         DrawRectangle(drawPos.x - 35, drawPos.y + 165, 140, 15, barBgColor); 
         DrawRectangle(drawPos.x - 35, drawPos.y + 165, (e->currentHP * 140) / e->maxHP, 15, hpColor);
         DrawText(TextFormat("%d / %d", e->currentHP, e->maxHP), drawPos.x - 35, drawPos.y + 185, 20, textColor);
@@ -410,11 +445,8 @@ void pauseForPlayer(bool wasPlayerTurn, std::vector<Entity*>& playerTeam, std::v
     while (!WindowShouldClose()) {
         BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, momentum);
         
-        // Match the center console dimensions exactly
-        DrawRectangle(550, 650, 700, 400, Fade(DARKPURPLE, 0.6f)); 
-        DrawRectangleLines(550, 650, 700, 400, PURPLE);
-        
-        // Centered prompt
+        DrawRectangle(550, 650, 630, 400, Fade(DARKPURPLE, 0.6f)); 
+        DrawRectangleLines(550, 650, 630, 400, PURPLE);
         DrawText("[ CLICK MOUSE OR PRESS ENTER TO CONTINUE ]", 580, 830, 25, YELLOW);
         
         EndDrawing();
@@ -431,11 +463,15 @@ void pauseForPlayer(bool wasPlayerTurn, std::vector<Entity*>& playerTeam, std::v
 void printCharacterStats(Entity* character) { GameLog::Add("--- " + character->name + "'s Turn ---"); }
 
 void handleStunnedCharacter(Entity* character, std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, int momentum) {
-    GameLog::Add(">>> " + character->name + " is stunned and loses their turn! <<<"); character->removeStatusByType(StatusType::Stun); pauseForPlayer(false, playerTeam, enemyTeam, momentum);
+    GameLog::Add(">>> " + character->name + " is stunned and loses their turn! <<<"); character->removeStatusByType(StatusCategory::HardCC); pauseForPlayer(false, playerTeam, enemyTeam, momentum);
 }
 
-std::vector<Entity*> requestPlayerTargets(Entity* attacker, Move selectedMove, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& playerTeam) {
+std::vector<Entity*> requestPlayerTargets(Entity* attacker, const Move& selectedMove, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& playerTeam) {
     std::vector<Entity*> selectedTargets;
+    
+    // <--- NEW: Reserve enough space for whichever team is larger
+    selectedTargets.reserve(std::max(playerTeam.size(), enemyTeam.size())); 
+    
     if (selectedMove.target == MoveTarget::Self) { selectedTargets.push_back(attacker); return selectedTargets; }
     if (selectedMove.target == MoveTarget::AllEnemies) { for (Entity* e : enemyTeam) if (e->isAlive) selectedTargets.push_back(e); return selectedTargets; }
     if (selectedMove.target == MoveTarget::AllAllies) { for (Entity* p : playerTeam) if (p->isAlive) selectedTargets.push_back(p); return selectedTargets; }
@@ -447,17 +483,34 @@ std::vector<Entity*> requestPlayerTargets(Entity* attacker, Move selectedMove, s
     if (targetsNeeded > aliveCount) targetsNeeded = aliveCount; if (targetsNeeded == 0) return selectedTargets;
     
     while (selectedTargets.size() < targetsNeeded && !WindowShouldClose()) {
-        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, 0);
-        
-        DrawRectangle(500, 600, 800, 480, Fade(DARKPURPLE, 0.6f)); DrawRectangleLines(500, 600, 800, 480, PURPLE);
-        DrawText(TextFormat("SELECT TARGET(S) FOR: %s (%d needed)", selectedMove.name.c_str(), targetsNeeded - selectedTargets.size()), 530, 630, 30, WHITE);
-        DrawText("[ HOVER OVER A TARGET AND CLICK, OR PRESS 'B' TO CANCEL ]", 530, 700, 20, LIGHTGRAY);
-        
-        for (Entity* e : validPool) {
+            BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, 0);
+            
+            // --- ALIGNED TO THE NEW MAIN MENU BOUNDS ---
+            DrawRectangle(550, 650, 630, 400, Fade(DARKPURPLE, 0.6f)); 
+            DrawRectangleLines(550, 650, 630, 400, PURPLE);
+            
+            DrawText(TextFormat("SELECT TARGET(S) FOR: %s (%d needed)", selectedMove.name.c_str(), targetsNeeded - selectedTargets.size()), 580, 670, 25, WHITE);
+            DrawText("[ HOVER OVER A TARGET AND CLICK, OR PRESS 'B' TO CANCEL ]", 580, 710, 18, LIGHTGRAY);
+            
+            for (Entity* e : validPool) {
             if (e->isAlive) {
                 Vector2 pos = GetBasePos(e, playerTeam, enemyTeam);
-                // Shrunk to wrap tightly around the 70x150 sprite
-                Rectangle targetBox = { pos.x - 20, pos.y - 20, 110, 200 };
+                
+                // --- HITBOX MATH ---
+                // Check if the target is a player to determine the correct scale
+                bool isPlayerTarget = (std::find(playerTeam.begin(), playerTeam.end(), e) != playerTeam.end());
+                float pixelScale = isPlayerTarget ? GameConfig::PLAYER_SCALE : GameConfig::ENEMY_SCALE;
+                
+                float hitboxW = 20.0f * pixelScale; // Fallback width
+                float hitboxH = 40.0f * pixelScale; // Fallback height
+                
+                if (globalSprites.count(e->actorID)) { 
+                    hitboxW = globalSprites[e->actorID].width * pixelScale;
+                    hitboxH = globalSprites[e->actorID].height * pixelScale;
+                }
+                
+                // Matches the drawing baseline perfectly!
+                Rectangle targetBox = { pos.x, pos.y + (150.0f - hitboxH), hitboxW, hitboxH };
                 
                 bool alreadySelected = (std::find(selectedTargets.begin(), selectedTargets.end(), e) != selectedTargets.end());
                 if (alreadySelected) { DrawRectangleLinesEx(targetBox, 3, GREEN); DrawText("SELECTED", targetBox.x, targetBox.y - 30, 20, GREEN); } 
@@ -477,12 +530,19 @@ std::vector<Entity*> requestPlayerTargets(Entity* attacker, Move selectedMove, s
 
 void manageParty(std::vector<Entity*>& masterRoster, std::vector<Entity*>& activeParty) { }
 
-void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& masterRoster, std::vector<TeamUpSkill>& masterTeamUps, int inventory[3], int& wallet, int& teamMomentum, std::vector<std::string>& previouslyActiveTeamUps, bool& battleIsActive, bool canFlee) {
+void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& masterRoster, std::vector<TeamUpSkill>& masterTeamUps, int* inventory, int& wallet, int& teamMomentum, std::vector<TeamUpSkill>& previouslyActiveTeamUps, bool& battleIsActive, bool canFlee) {
+    
+    static bool showDetailsPopup = false;
+    
+    // --- THE FIX: DECLARE THE POPUP VARIABLES ---
+    static std::string detailsPopupTitle = "";
+    static std::string detailsPopupText = "";
+    // --------------------------------------------
     bool turnComplete = false; bool inItemMenu = false; bool inReviveMenu = false; bool inTeamUpMenu = false; bool inSwapMenu = false; bool inActiveMenu = false;
     ActiveID detailedActive = ActiveID::None; // For the right-click menu
     int swapGroup = -1; int swapIndex = -1; int detailedItem = 0; // For right-clicking backpack items
          
-    bool showDetailsPopup = false; Move detailedMove; Entity* detailedEntity = nullptr; int detailsType = 0; int pendingMomentumCost = 0;
+    Move detailedMove; Entity* detailedEntity = nullptr; int detailsType = 0; int pendingMomentumCost = 0;
     
     // --- NEW: Add this variable to track which Team Up we right-clicked ---
     std::string detailedTeamUpName = "";
@@ -491,13 +551,13 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
         Move selectedMove; bool moveSelected = false;
         BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, teamMomentum);
         
-        DrawRectangle(550, 650, 700, 400, Fade(DARKBLUE, 0.5f)); 
-        DrawRectangleLines(550, 650, 700, 400, WHITE);
+        // NARROWED BY 70px TO MAKE ROOM FOR COMBAT LOG
+        DrawRectangle(550, 650, 630, 400, Fade(DARKBLUE, 0.5f)); 
+        DrawRectangleLines(550, 650, 630, 400, WHITE);
         
         // 1. Update this line so the main menu hides when you open the Active Skills menu!
         bool isMainMenu = (!inItemMenu && !inReviveMenu && !inTeamUpMenu && !inSwapMenu && !inActiveMenu);
         
-        // 2. Keep your sprite clicking block right here at the top
         // 2. Keep your sprite clicking block right here at the top
         if (!showDetailsPopup) {
             // Check Enemy Sprite Clicks
@@ -505,8 +565,16 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 if (!e->isAlive) continue; 
                 Vector2 pos = GetBasePos(e, playerTeam, enemyTeam);
                 
-                // Updated Hitbox
-                if (CheckCollisionPointRec(GetMousePosition(), {pos.x - 20, pos.y - 20, 110, 200}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = e; detailsType = 5; showDetailsPopup = true; }
+                float pixelScale = GameConfig::ENEMY_SCALE;
+                float hitboxW = 20.0f * pixelScale;
+                float hitboxH = 40.0f * pixelScale;
+                if (globalSprites.count(e->actorID)) {
+                    hitboxW = globalSprites[e->actorID].width * pixelScale;
+                    hitboxH = globalSprites[e->actorID].height * pixelScale;
+                }
+                Rectangle targetBox = { pos.x, pos.y + (150.0f - hitboxH), hitboxW, hitboxH };
+
+                if (CheckCollisionPointRec(GetMousePosition(), targetBox) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = e; detailsType = 5; showDetailsPopup = true; }
             }
             
             // Check Player Sprite AND Profile Clicks
@@ -515,8 +583,17 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 if (!p->isAlive) continue; 
                 Vector2 pos = GetBasePos(p, playerTeam, enemyTeam);
                 
-                // Updated Hitbox for Sprite
-                if (CheckCollisionPointRec(GetMousePosition(), {pos.x - 20, pos.y - 20, 110, 200}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
+                float pixelScale = GameConfig::PLAYER_SCALE;
+                float hitboxW = 20.0f * pixelScale;
+                float hitboxH = 40.0f * pixelScale;
+                if (globalSprites.count(p->actorID)) {
+                    hitboxW = globalSprites[p->actorID].width * pixelScale;
+                    hitboxH = globalSprites[p->actorID].height * pixelScale;
+                }
+                Rectangle targetBox = { pos.x, pos.y + (150.0f - hitboxH), hitboxW, hitboxH };
+
+                // Hitbox for Sprite
+                if (CheckCollisionPointRec(GetMousePosition(), targetBox) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
                 
                 // Hitbox for Profile Picture
                 if (CheckCollisionPointRec(GetMousePosition(), {50, 650.0f + (i * 120), 80, 80}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
@@ -527,6 +604,19 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
         if (isMainMenu) {
             DrawText(TextFormat("WHAT WILL %s DO?", character->name.c_str()), 580, 670, 30, WHITE);
             DrawText("[ Scroll to see more options | Right-Click to Inspect! ]", 580, 710, 18, LIGHTGRAY);
+            
+            // --- NEW: DYNAMIC STANCE TRACKERS ---
+            if (character->naturalAbility == NaturalID::ScrewDat) {
+                if (character->isAltStance) {
+                    // Calculates exact current charge (Max 120%)
+                    int currentBoost = std::min(120, character->screwDatStacks * 30);
+                    DrawText(TextFormat("ULT CHARGE: +%d%%", currentBoost), 950, 675, 20, ORANGE);
+                } else {
+                    // Shows the permanent stacking heal power
+                    DrawText(TextFormat("HEAL POWER: %d%%", character->supportHealStacks), 950, 675, 20, GREEN);
+                }
+            }
+            // ------------------------------------
             
             // --- NEW: Scroll Logic ---
             static int mainMenuScrollY = 0;
@@ -577,6 +667,31 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
             rightY += 50;
             
             int nextBtnNum = 8;
+
+            // ---> THE NATURAL ACTIVE BUTTON <---
+            if (character->naturalAbility == NaturalID::Mediator) {
+                bool canUseNat = canUseNaturalActive(*character, playerTeam);
+                Rectangle medBtnRec = {900, (float)rightY, 250, 40};
+                
+                if (DrawGUIButton(medBtnRec, TextFormat("%d. Mediator", nextBtnNum), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup || !canUseNat)) {
+                    if (canUseNat) {
+                        executeNaturalActive(*character, playerTeam, enemyTeam);
+                        turnComplete = true; 
+                    }
+                }
+                
+                // --- THE FIX: ADD DETAILS TYPE 3 ---
+                if (CheckCollisionPointRec(GetMousePosition(), medBtnRec) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup) {
+                    detailsPopupTitle = "Natural Ability: Mediator";
+                    detailsPopupText = "Take the heat. Heal 50% HP, gain Taunt & Stun Immunity.\nPassive: -15% DMG Taken. Awakens (-30% total DMG Taken) if an ally is <20% HP or faints.";
+                    detailsType = 3; // <--- THIS WAS MISSING!
+                    showDetailsPopup = true; 
+                }
+                
+                rightY += 50;
+                nextBtnNum++;
+            }
+            
             if (!character->activeAbilities.empty()) {
                 if (DrawGUIButton({900, (float)rightY, 250, 40}, TextFormat("%d. Active Skill", nextBtnNum), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) {
                     inActiveMenu = true;
@@ -586,7 +701,7 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
             }
             
             if (!character->altCombatMenu.empty()) {
-                if (DrawGUIButton({900, (float)rightY, 250, 40}, TextFormat("%d. Stance (%s)", nextBtnNum, character->isAltStance ? "Strike" : "Support"), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) { 
+                if (DrawGUIButton({900, (float)rightY, 250, 40}, TextFormat("%d. Stance (%s)", nextBtnNum, character->isAltStance ? "Support" : "Strike"), (nextBtnNum == 8 ? KEY_EIGHT : KEY_NINE), showDetailsPopup)) { 
                     character->toggleStance(); GameLog::Add(character->name + " shifted their combat stance!"); 
                 }
                 rightY += 50;
@@ -627,10 +742,23 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
         else if (inReviveMenu) {
             DrawText("WHO TO REVIVE?", 580, 670, 30, WHITE);
             int startY = 750; int btnIndex = 0; int buttonKeys[3] = {KEY_ONE, KEY_TWO, KEY_THREE};
-            
+                         
             for (Entity* p : playerTeam) {
                 if (!p->isAlive) {
-                    if (DrawGUIButton({ 580.0f, (float)startY + (btnIndex * 50), 300.0f, 40.0f }, (std::to_string(btnIndex + 1) + ". " + p->name).c_str(), buttonKeys[btnIndex], showDetailsPopup)) { inventory[2]--; p->isAlive = true; p->currentHP = p->maxHP / 2; GameLog::Add(character->name + " used a Revive on " + p->name + "!"); turnComplete = true; break; }
+                    if (DrawGUIButton({ 580.0f, (float)startY + (btnIndex * 50), 300.0f, 40.0f }, (std::to_string(btnIndex + 1) + ". " + p->name).c_str(), buttonKeys[btnIndex], showDetailsPopup)) { 
+                        inventory[2]--; 
+                        p->isAlive = true; 
+                        
+                        // ---> THE FIX 1: Half HP, Half Stamina, and clear all buffs/debuffs <---
+                        p->currentHP = p->maxHP / 2; 
+                        p->currentStamina = p->maxStamina / 2;
+                        p->resetStats(); 
+                        // -----------------------------------------------------------------------
+                        
+                        GameLog::Add(character->name + " used a Revive on " + p->name + "!"); 
+                        turnComplete = true; 
+                        break; 
+                    }
                     btnIndex++;
                 }
             }
@@ -662,8 +790,8 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 }
             }
             
-            // Shifted Cancel button to 1000 so it sits perfectly in the gap
-            if (DrawGUIButton({1000, 750, 200, 40}, "0. Cancel [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) inTeamUpMenu = false;
+            // Shifted Cancel button left to 950 so it fits safely within the 1180px right-edge boundary
+            if (DrawGUIButton({950, 750, 200, 40}, "0. Cancel [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) inTeamUpMenu = false;
         }
         else if (inActiveMenu) {
             DrawText("ACTIVE ABILITIES:", 580, 670, 30, ORANGE);
@@ -712,31 +840,45 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
             auto DrawSlot = [&](Rectangle r, int g, int i) {
                 Entity* e = getEntity(g, i);
                 std::string label = e ? TextFormat("%s [HP: %d]", e->name.c_str(), e->currentHP) : "[ EMPTY ]";
-                
+                                 
                 if (DrawGUIButton(r, label.c_str(), 0, showDetailsPopup)) {
                     if (swapGroup == -1) { 
-                        if (e != nullptr) { swapGroup = g; swapIndex = i; } 
-                    } else { 
-                        Entity* temp = getEntity(swapGroup, swapIndex);
-                        
-                        if (swapGroup == 0) tempActive[swapIndex] = getEntity(g, i);
-                        else tempReserves[swapIndex] = getEntity(g, i);
-                        
-                        if (g == 0) tempActive[i] = temp;
-                        else tempReserves[i] = temp;
-                        
-                        playerTeam.clear();
-                        for (auto* ent : tempActive) if (ent != nullptr) playerTeam.push_back(ent);
-                        
-                        masterRoster.clear();
-                        for (auto* ent : tempReserves) if (ent != nullptr) masterRoster.push_back(ent);
-                        
-                        swapGroup = -1; swapIndex = -1;
-                    }
+                         if (e != nullptr) { swapGroup = g; swapIndex = i; } 
+                     } else { 
+                         // ---> THE FIX: Grab the exact pointers BEFORE we overwrite their slots! <---
+                         Entity* swappedA = getEntity(swapGroup, swapIndex);
+                         Entity* swappedB = getEntity(g, i);
+                                                 
+                         if (swapGroup == 0) tempActive[swapIndex] = swappedB;
+                         else tempReserves[swapIndex] = swappedB;
+                                                 
+                         if (g == 0) tempActive[i] = swappedA;
+                         else tempReserves[i] = swappedA;
+                                                 
+                         playerTeam.clear();
+                         for (auto* ent : tempActive) if (ent != nullptr) playerTeam.push_back(ent);
+                                                 
+                         masterRoster.clear();
+                         for (auto* ent : tempReserves) if (ent != nullptr) masterRoster.push_back(ent);
+                         
+                         // ---> NEW: Log the switch safely to the Combat Log! <---
+                         std::string nameA = swappedA ? swappedA->name : "Empty Slot";
+                         std::string nameB = swappedB ? swappedB->name : "Empty Slot";
+                         GameLog::Add(">>> " + nameA + " swapped places with " + nameB + "! <<<");
+                                                 
+                         // If the character currently taking their turn was swapped, hand the turn to the new character!
+                         if (character == swappedA && swappedB != nullptr) character = swappedB;
+                         else if (character == swappedB && swappedA != nullptr) character = swappedA;
+
+                         swapGroup = -1; swapIndex = -1;
+                         
+                         // Automatically close the swap menu to speed up combat!
+                         inSwapMenu = false; 
+                     }
                 }
                 // Highlight the selected slot
                 if (swapGroup == g && swapIndex == i) DrawRectangleLinesEx(r, 3, ORANGE);
-
+                
                 // ---> NEW: Right-Click Inspect for Mid-Battle Swapping <---
                 if (CheckCollisionPointRec(GetMousePosition(), r) && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && !showDetailsPopup && e != nullptr) {
                     detailedEntity = e; 
@@ -745,38 +887,35 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 }
             };
 
-            DrawText("ACTIVE:", 580, 765, 20, GREEN);
-            // Shifted active slots to 580
-            for (int i=0; i < 3; i++) DrawSlot({580, 790.0f + (i * 45), 200, 40}, 0, i);
-
-            // Shifted reserve slots to 800 (Sitting right next to Active)
-            DrawText("RESERVES:", 800, 765, 20, GOLD);
-            for (int i=0; i < 3; i++) DrawSlot({800, 790.0f + (i * 45), 200, 40}, 1, i);
-
-            // Shifted Back button to 1020 (Sitting to the right of Reserves)
-            if (DrawGUIButton({1020, 790, 200, 40}, "0. Back [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) {
+            // --- SQUISHED COLUMNS TO FIT NEW UI BOUNDS ---
+            DrawText("ACTIVE:", 570, 765, 20, GREEN);
+            for (int i=0; i < 3; i++) DrawSlot({570, 790.0f + (i * 45), 180, 40}, 0, i);
+            
+            DrawText("RESERVES:", 770, 765, 20, GOLD);
+            for (int i=0; i < 3; i++) DrawSlot({770, 790.0f + (i * 45), 180, 40}, 1, i);
+            
+            if (DrawGUIButton({970, 790, 180, 40}, "0. Back [B]", KEY_ZERO, showDetailsPopup) || (!showDetailsPopup && IsKeyReleased(KEY_B))) {
                 inSwapMenu = false; swapGroup = -1; swapIndex = -1;
             }
         }
 
         if (showDetailsPopup) {
             DrawRectangle(0, 0, 1920, 1080, Fade(BLACK, 0.95f));
-            DrawRectangle(500, 300, 920, 480, DARKGRAY); DrawRectangleLinesEx({500, 300, 920, 480}, 4, WHITE);
             
-            // --- FIX: RESTORED THE MOVE RENDERING BLOCK ---
+            // --- NEW: MASSIVELY EXPANDED BOX ---
+            DrawRectangle(360, 200, 1200, 680, DARKGRAY); 
+            DrawRectangleLinesEx({360, 200, 1200, 680}, 4, WHITE);
+            
             if (detailsType == 1) {
                 DrawText(detailedMove.name.c_str(), 550, 350, 50, GOLD); 
                 DrawText(TextFormat("TYPE: %s", getCategoryName(detailedMove.category).c_str()), 550, 420, 30, LIGHTGRAY);
-                
                 if (detailedMove.category == MoveCategory::TeamUp) DrawText(TextFormat("MOMENTUM COST: %d%%", detailedMove.staminaCost), 550, 470, 30, YELLOW);
                 else DrawText(TextFormat("STAMINA COST: %d", detailedMove.staminaCost), 550, 470, 30, GREEN);
-                
                 DrawText(TextFormat("HITS: %d", detailedMove.hitCount), 550, 520, 30, WHITE);
                 DrawText(TextFormat("POWER MULTIPLIER: %.1fx", detailedMove.powerMultiplier), 550, 570, 30, ORANGE);
                 DrawText(TextFormat("TARGETS: %s", getTargetText(detailedMove.target).c_str()), 550, 640, 30, SKYBLUE);
                 DrawText(TextFormat("EFFECT: %s", getEffectText(detailedMove.effect).c_str()), 550, 690, 30, PURPLE);
             } 
-            // --- NEW: TEAM UP RENDER BLOCK ---
             else if (detailsType == 2) {
                 for (TeamUpSkill& tu : masterTeamUps) {
                     if (tu.name == detailedTeamUpName) {
@@ -787,7 +926,6 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                         DrawText(TextFormat("TARGETS: %s", getTargetText(tu.moveData.target).c_str()), 550, 590, 30, SKYBLUE); 
                         DrawText(TextFormat("EFFECT: %s", getEffectText(tu.moveData.effect).c_str()), 550, 640, 30, PURPLE);
                         
-                        // Parse out the required actors
                         std::string reqs = "CREW REQUIRED: ";
                         for (ActorID r : tu.requiredMembers) {
                             if (r == ActorID::Brian) reqs += "Brian  ";
@@ -800,6 +938,15 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                     }
                 }
             }
+            else if (detailsType == 3) {
+                // --- NEW: THE MEDIATOR DRAWING BLOCK ---
+                DrawText(detailsPopupTitle.c_str(), 550, 350, 50, GOLD);
+                DrawText("TYPE: NATURAL ABILITY", 550, 420, 30, LIGHTGRAY);
+                DrawText("EFFECT:", 550, 490, 25, GREEN);
+                
+                // We use a slightly smaller font (22) for the description so the line breaks fit nicely!
+                DrawText(detailsPopupText.c_str(), 550, 530, 22, WHITE);
+            }
             else if (detailsType == 4) {
                 DrawText(getActiveName(detailedActive).c_str(), 550, 350, 50, GOLD);
                 DrawText("TYPE: ACTIVE", 550, 420, 30, LIGHTGRAY);
@@ -809,7 +956,6 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
             else if (detailsType == 5 && detailedEntity != nullptr) {
                 static int inspectScrollY = 0;
                 
-                // --- NEW: Word Wrap Helper ---
                 auto wrapText = [](const std::string& text, int maxChars) {
                     std::string wrapped = text;
                     int lastSpace = -1;
@@ -824,32 +970,65 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                     }
                     return wrapped;
                 };
-
-                // Helper to count lines for spacing
+                
                 auto countLines = [](const std::string& text) {
                     int lines = 1;
                     for(char c : text) if(c == '\n') lines++;
                     return lines;
                 };
-
-                // --- PRE-CALCULATE HEIGHT FOR SCROLL CLAMPING ---
-                int predicted_dY = 530; // Base start for abilities
-                if (detailedEntity->naturalAbility != PassiveID::None) {
-                    std::string desc = wrapText(getPassiveDescription(detailedEntity->naturalAbility), 42);
+                
+                int predicted_dY = 410; 
+                if (detailedEntity->naturalAbility != NaturalID::None) {
+                    std::string desc = wrapText(getNaturalDescription(detailedEntity->naturalAbility), 55);
                     predicted_dY += 28 + (countLines(desc) * 22) + 15;
                 }
                 for(auto& p : detailedEntity->passiveAbilities) { 
                     if (p == PassiveID::None) continue;
-                    std::string desc = wrapText(getPassiveDescription(p), 42);
+                    std::string desc = wrapText(getPassiveDescription(p), 55);
                     predicted_dY += 28 + (countLines(desc) * 22) + 15;
                 }
                 for(auto& a : detailedEntity->activeAbilities) { 
                     if (a == ActiveID::None) continue;
-                    std::string desc = wrapText(getActiveDescription(a), 42);
+                    std::string desc = wrapText(getActiveDescription(a), 55);
                     predicted_dY += 28 + (countLines(desc) * 22) + 15;
                 }
-                
-                int predicted_mY = 380;
+
+                // ---> NEW: AGGREGATE STATS TO EXPAND SCROLL AREA <---
+                int netATK = 0, netDEF = 0, netSPD = 0, netBIQ = 0, netSIQ = 0;
+                bool hasStun = false, hasTaunt = false, hasStamDown = false;
+                int bleedDamage = 0;
+
+                for (auto& s : detailedEntity->activeStatuses) {
+                    if (s.targetStat == StatName::ATK) netATK += s.statModifier;
+                    if (s.targetStat == StatName::DEF) netDEF += s.statModifier;
+                    if (s.targetStat == StatName::SPD) netSPD += s.statModifier;
+                    if (s.targetStat == StatName::BIQ) netBIQ += s.statModifier;
+                    if (s.targetStat == StatName::SIQ) netSIQ += s.statModifier;
+                    
+                    if (s.causesStun || s.category == StatusCategory::HardCC) hasStun = true;
+                    if (s.causesTaunt) hasTaunt = true;
+                    if (s.halvesStaminaRegen) hasStamDown = true;
+                    if (s.dotDamage > 0) bleedDamage += s.dotDamage;
+                }
+
+                int effectCount = 0;
+                if (netATK != 0) effectCount++;
+                if (netDEF != 0) effectCount++;
+                if (netSPD != 0) effectCount++;
+                if (netBIQ != 0) effectCount++;
+                if (netSIQ != 0) effectCount++;
+                if (detailedEntity->hitNullificationStacks > 0) effectCount++;
+                if (detailedEntity->shieldHP > 0) effectCount++;
+                if (hasStun) effectCount++;
+                if (hasTaunt) effectCount++;
+                if (hasStamDown) effectCount++;
+                if (bleedDamage > 0) effectCount++;
+                if (effectCount == 0) effectCount = 1; // Reserves space for "[ NONE ]"
+
+                predicted_dY += 45 + (effectCount * 25);
+                // ----------------------------------------------------
+
+                int predicted_mY = 280;
                 predicted_mY += detailedEntity->combatMenu.size() * 115;
                 if (!detailedEntity->altCombatMenu.empty()) {
                     predicted_mY += 55;
@@ -859,78 +1038,120 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 int maxAbsoluteY = std::max(predicted_dY, predicted_mY);
                 int maxScroll = 0;
                 
-                if (maxAbsoluteY > 780) maxScroll = -(maxAbsoluteY - 760); 
+                if (maxAbsoluteY > 860) maxScroll = -(maxAbsoluteY - 840); 
                 
                 if (inspectScrollY < maxScroll) inspectScrollY = maxScroll;
                 if (inspectScrollY > 0) inspectScrollY = 0;
                 
-                if (CheckCollisionPointRec(GetMousePosition(), {500, 300, 920, 480})) {
+                if (CheckCollisionPointRec(GetMousePosition(), {360, 200, 1200, 680})) {
                     inspectScrollY += GetMouseWheelMove() * 40;
                     if (inspectScrollY < maxScroll) inspectScrollY = maxScroll;
                     if (inspectScrollY > 0) inspectScrollY = 0;
                 }
                 
-                BeginScissorMode(500, 300, 920, 480);
+                BeginScissorMode(360, 200, 1200, 680);
                 
-                DrawText(TextFormat("INSPECTING: %s", detailedEntity->name.c_str()), 530, 320 + inspectScrollY, 40, GOLD);
+                DrawText(TextFormat("INSPECTING: %s", detailedEntity->name.c_str()), 400, 230 + inspectScrollY, 40, GOLD);
                 
-                // --- COLUMN 1: Stats & Abilities (Left Side) ---
                 DrawText(TextFormat("HP: %d/%d  |  ATK: %d  |  DEF: %d  |  SPD: %d", 
-                     detailedEntity->currentHP, detailedEntity->maxHP,
-                     detailedEntity->currentAttack, detailedEntity->currentDefense, 
-                     detailedEntity->currentSpeed), 530, 380 + inspectScrollY, 22, GREEN);
-                     
+                      detailedEntity->currentHP, detailedEntity->maxHP, 
+                    detailedEntity->currentAttack, detailedEntity->currentDefense, 
+                      detailedEntity->currentSpeed), 400, 290 + inspectScrollY, 22, GREEN);
+                      
                 DrawText(TextFormat("STM: %d/%d  |  BIQ: %d  |  SIQ: %d", 
-                     detailedEntity->currentStamina, detailedEntity->maxStamina, 
-                     detailedEntity->currentBIQ, detailedEntity->currentSIQ), 530, 420 + inspectScrollY, 22, GREEN);
+                      detailedEntity->currentStamina, detailedEntity->maxStamina, 
+                      detailedEntity->currentBIQ, detailedEntity->currentSIQ), 400, 330 + inspectScrollY, 22, GREEN);
                 
-                int dY = 490 + inspectScrollY; 
-                DrawText("ABILITIES:", 530, dY, 25, SKYBLUE); dY += 40; 
+                int dY = 390 + inspectScrollY; 
+                DrawText("ABILITIES:", 400, dY, 25, SKYBLUE); dY += 40; 
                 
-                if (detailedEntity->naturalAbility != PassiveID::None) {
-                    DrawText(TextFormat("[NATURAL] %s:", getPassiveName(detailedEntity->naturalAbility).c_str()), 530, dY, 20, GOLD); dY += 28;
-                    std::string desc = wrapText(getPassiveDescription(detailedEntity->naturalAbility), 42);
-                    DrawText(desc.c_str(), 550, dY, 18, LIGHTGRAY); 
+                if (detailedEntity->naturalAbility != NaturalID::None) {
+                    DrawText(TextFormat("[NATURAL] %s:", getNaturalName(detailedEntity->naturalAbility).c_str()), 400, dY, 20, GOLD); dY += 28;
+                    std::string desc = wrapText(getNaturalDescription(detailedEntity->naturalAbility), 55); 
+                    DrawText(desc.c_str(), 420, dY, 18, LIGHTGRAY); 
                     dY += (countLines(desc) * 22) + 15;
                 }
                 
                 for(auto& p : detailedEntity->passiveAbilities) { 
                     if (p == PassiveID::None) continue;
-                    DrawText(TextFormat("[PASSIVE] %s:", getPassiveName(p).c_str()), 530, dY, 20, GREEN); dY += 28;
-                    std::string desc = wrapText(getPassiveDescription(p), 42);
-                    DrawText(desc.c_str(), 550, dY, 18, LIGHTGRAY); 
+                    DrawText(TextFormat("[PASSIVE] %s:", getPassiveName(p).c_str()), 400, dY, 20, GREEN); dY += 28;
+                    std::string desc = wrapText(getPassiveDescription(p), 55);
+                    DrawText(desc.c_str(), 420, dY, 18, LIGHTGRAY); 
                     dY += (countLines(desc) * 22) + 15;
                 }
                 
                 for(auto& a : detailedEntity->activeAbilities) { 
                     if (a == ActiveID::None) continue;
-                    DrawText(TextFormat("[ACTIVE] %s:", getActiveName(a).c_str()), 530, dY, 20, ORANGE); dY += 28;
-                    std::string desc = wrapText(getActiveDescription(a), 42);
-                    DrawText(desc.c_str(), 550, dY, 18, LIGHTGRAY); 
+                    DrawText(TextFormat("[ACTIVE] %s:", getActiveName(a).c_str()), 400, dY, 20, ORANGE); dY += 28;
+                    std::string desc = wrapText(getActiveDescription(a), 55);
+                    DrawText(desc.c_str(), 420, dY, 18, LIGHTGRAY); 
                     dY += (countLines(desc) * 22) + 15;
                 }
 
-                // --- COLUMN 2: Moveset (Right Side) ---
-                int mY = 380 + inspectScrollY;
-                DrawText("MOVESET:", 1000, 340 + inspectScrollY, 25, PURPLE);
-                for(auto& m : detailedEntity->combatMenu) {
-                    DrawText(TextFormat("> %s [%d STM]", m.name.c_str(), m.staminaCost), 1000, mY, 22, WHITE); mY += 35;
-                    DrawText(TextFormat("  Pow: %.1fx | Hits: %d | Tgt: %s", m.powerMultiplier, m.hitCount, getTargetText(m.target).c_str()), 1000, mY, 18, LIGHTGRAY); mY += 30;
-                    DrawText(TextFormat("  Eff: %s", getEffectText(m.effect).c_str()), 1000, mY, 18, SKYBLUE); mY += 50;
-                }
-                
-                // If they have an Alt Stance (Like Brian), print it right below their standard moves!
-                if (!detailedEntity->altCombatMenu.empty()) {
-                    mY += 15; // Extra spacing
-                    DrawText("ALT STANCE MOVES:", 1000, mY, 25, PURPLE); mY += 40;
-                    for(auto& m : detailedEntity->altCombatMenu) {
-                        DrawText(TextFormat("> %s [%d STM]", m.name.c_str(), m.staminaCost), 1000, mY, 22, WHITE); mY += 35;
-                        DrawText(TextFormat("  Pow: %.1fx | Hits: %d | Tgt: %s", m.powerMultiplier, m.hitCount, getTargetText(m.target).c_str()), 1000, mY, 18, LIGHTGRAY); mY += 30;
-                        DrawText(TextFormat("  Eff: %s", getEffectText(m.effect).c_str()), 1000, mY, 18, SKYBLUE); mY += 50;
+                // ---> NEW: DRAW THE NET STATUS EFFECTS BOARD <---
+                dY += 15;
+                DrawText("ACTIVE STATUS EFFECTS:", 400, dY, 25, RED); dY += 35;
+
+                if (effectCount == 1 && netATK == 0 && netDEF == 0 && netSPD == 0 && netBIQ == 0 && netSIQ == 0 && detailedEntity->hitNullificationStacks == 0 && detailedEntity->shieldHP == 0 && !hasStun && !hasTaunt && !hasStamDown && bleedDamage == 0) {
+                    DrawText("[ NONE ]", 420, dY, 20, DARKGRAY); dY += 25;
+                } else {
+                    // Lambda helper to instantly format and draw stat lines
+                    auto PrintStatEffect = [&](const char* name, int netVal, int baseVal) {
+                        if (netVal == 0) return;
+                        int pct = (baseVal > 0) ? (int)(((float)netVal / baseVal) * 100.0f) : 0;
+                        Color col = (netVal > 0) ? GREEN : RED;
+                        std::string sign = (netVal > 0) ? "+" : "";
+                        std::string text = TextFormat("> %s: %s%d%% (%s%d Flat)", name, sign.c_str(), pct, sign.c_str(), netVal);
+                        DrawText(text.c_str(), 420, dY, 20, col);
+                        dY += 25;
+                    };
+                    
+                    PrintStatEffect("Attack", netATK, detailedEntity->baseAttack);
+                    PrintStatEffect("Defense", netDEF, detailedEntity->baseDefense);
+                    PrintStatEffect("Speed", netSPD, detailedEntity->baseSpeed);
+                    PrintStatEffect("Battle IQ", netBIQ, detailedEntity->baseBIQ);
+                    PrintStatEffect("Strategic IQ", netSIQ, detailedEntity->baseSIQ);
+                    
+                    if (detailedEntity->hitNullificationStacks > 0) {
+                        DrawText(TextFormat("> Hit Nullification: x%d", detailedEntity->hitNullificationStacks), 420, dY, 20, SKYBLUE); dY += 25;
+                    }
+                    if (detailedEntity->shieldHP > 0) {
+                        DrawText(TextFormat("> Shield: %d HP", detailedEntity->shieldHP), 420, dY, 20, SKYBLUE); dY += 25;
+                    }
+                    if (hasStun) {
+                        DrawText("> Stunned: Cannot act this turn.", 420, dY, 20, RED); dY += 25;
+                    }
+                    if (hasTaunt) {
+                        DrawText("> Taunting: Drawing all enemy attacks.", 420, dY, 20, ORANGE); dY += 25;
+                    }
+                    if (hasStamDown) {
+                        DrawText("> Wind Knocked Out: Stamina Regen Halved.", 420, dY, 20, RED); dY += 25;
+                    }
+                    if (bleedDamage > 0) {
+                        DrawText(TextFormat("> Bleeding: Takes %d DMG at end of turn.", bleedDamage), 420, dY, 20, RED); dY += 25;
                     }
                 }
+                // ----------------------------------------------------
+
+                // --- COLUMN 2: Pushed to the right ---
+                int mY = 280 + inspectScrollY;
+                DrawText("MOVESET:", 1020, 240 + inspectScrollY, 25, PURPLE);
+                for(auto& m : detailedEntity->combatMenu) {
+                    DrawText(TextFormat("> %s [%d STM]", m.name.c_str(), m.staminaCost), 1020, mY, 22, WHITE); mY += 35;
+                    DrawText(TextFormat("  Pow: %.1fx | Hits: %d | Tgt: %s", m.powerMultiplier, m.hitCount, getTargetText(m.target).c_str()), 1020, mY, 18, LIGHTGRAY); mY += 30;
+                    DrawText(TextFormat("  Eff: %s", getEffectText(m.effect).c_str()), 1020, mY, 18, SKYBLUE); mY += 50;
+                }
                 
-                EndScissorMode(); // Stop clipping
+                if (!detailedEntity->altCombatMenu.empty()) {
+                    mY += 15; 
+                    DrawText("ALT STANCE MOVES:", 1020, mY, 25, PURPLE); mY += 40;
+                    for(auto& m : detailedEntity->altCombatMenu) {
+                        DrawText(TextFormat("> %s [%d STM]", m.name.c_str(), m.staminaCost), 1020, mY, 22, WHITE); mY += 35;
+                        DrawText(TextFormat("  Pow: %.1fx | Hits: %d | Tgt: %s", m.powerMultiplier, m.hitCount, getTargetText(m.target).c_str()), 1020, mY, 18, LIGHTGRAY); mY += 30;
+                        DrawText(TextFormat("  Eff: %s", getEffectText(m.effect).c_str()), 1020, mY, 18, SKYBLUE); mY += 50;
+                    }
+                }
+                EndScissorMode();
             }
             else if (detailsType == 6) {
                 std::string iName = ""; std::string iDesc = "";
@@ -943,7 +1164,9 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 DrawText("EFFECT:", 550, 490, 25, GREEN);
                 DrawText(iDesc.c_str(), 550, 530, 25, WHITE);
             }
-            if (DrawGUIButton({550, 800, 300, 60}, "Close Info [B]", 0) || IsKeyReleased(KEY_B)) showDetailsPopup = false;
+            
+            // --- MOVED THE BUTTON SAFELY BELOW THE BOX ---
+            if (DrawGUIButton({810, 900, 300, 60}, "Close Info [B]", 0) || IsKeyReleased(KEY_B)) showDetailsPopup = false;
         }
         EndDrawing();
         

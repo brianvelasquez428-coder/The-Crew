@@ -3,7 +3,10 @@
 
 std::vector<TeamUpSkill> getActiveTeamUps(std::vector<Entity*>& team, std::vector<TeamUpSkill>& masterList) {
     std::vector<TeamUpSkill> activeList;
+    activeList.reserve(masterList.size()); // <--- NEW: Grabs exact memory needed
+    
     std::vector<ActorID> aliveActors;
+    aliveActors.reserve(team.size());      // <--- NEW: Grabs exact memory needed
     
     // Store alive ActorIDs instead of string names
     for (Entity* member : team) {
@@ -30,21 +33,16 @@ std::vector<TeamUpSkill> buildMasterTeamUps() {
         "The Crew's All-Out Attack", 
         {ActorID::Brian, ActorID::Paul, ActorID::Vince}, 
         100,
-        {MoveID::AllOutAttack, "All-Out Attack", 0, 10, MoveCategory::TeamUp, MoveTarget::OneEnemy, Effect::IgnoreDefense, 7.0f} 
+        // Added EffectTiming::PreHit so it ignores defense BEFORE the massive hit
+        {MoveID::AllOutAttack, "All-Out Attack", 0, 10, 7.0f, MoveTarget::OneEnemy, Effect::IgnoreDefense, EffectTiming::PreHit, MoveCategory::TeamUp, false} 
     });
     
     masterList.push_back({
         "Brothers in Arms", 
         {ActorID::Brian, ActorID::Paul}, 
         50,
-        {MoveID::BrothersInArms, "Brothers in Arms", 0, 6, MoveCategory::TeamUp, MoveTarget::OneEnemy, Effect::DefenseScalingDamage, 5.0f} 
-    });
-    
-    masterList.push_back({
-        "Heavy Hitters", 
-        {ActorID::Paul, ActorID::Vince}, 
-        50,
-        {MoveID::HeavyHitters, "Heavy Hitters", 0, 4, MoveCategory::TeamUp, MoveTarget::OneEnemy, Effect::LightsOutStun, 5.0f} 
+        // Added EffectTiming::PostHit to this one
+        {MoveID::BrothersInArms, "Brothers in Arms", 0, 6, 5.0f, MoveTarget::OneEnemy, Effect::None, EffectTiming::PostHit, MoveCategory::TeamUp, false}
     });
     
     return masterList;

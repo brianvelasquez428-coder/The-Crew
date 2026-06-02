@@ -4,7 +4,7 @@
 
 static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string name, LifeStage stage, bool isBoss,
                       int hp, int atk, int def, int spd, int biq, int siq,
-                      PassiveID naturalAbility) {
+                      NaturalID naturalAbility) {
     Entity e(name, stage, isBoss);
     e.internalID = internalID; e.actorID = actorID; 
     e.maxHP = hp; e.currentHP = hp;
@@ -23,7 +23,7 @@ static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string n
 }
 
 Entity buildTony() {
-    Entity boss = buildBaseStats(EntityID::BossTony, ActorID::Tony, "Tony", LifeStage::Adult, true, 1500, 240, 260, 220, 150, 110, PassiveID::Sparring);
+    Entity boss = buildBaseStats(EntityID::BossTony, ActorID::Tony, "Tony", LifeStage::Adult, true, 1500, 240, 260, 220, 150, 110, NaturalID::Sparring);
     boss.hiddenAbility = PassiveID::Combo;
 
     boss.activeAbilities.push_back(ActiveID::BodyWork);
@@ -38,7 +38,7 @@ Entity buildTony() {
     tonyPhase2.transitionText = "Tony drops his guard, plants his feet, and cracks his knuckles. The sparring match is over.";
     tonyPhase2.newAttack = boss.baseAttack; tonyPhase2.newDefense = boss.baseDefense; tonyPhase2.newSpeed = boss.baseSpeed;
     tonyPhase2.newBIQ = boss.baseBIQ; tonyPhase2.newSIQ = boss.baseSIQ;
-    tonyPhase2.newNaturalAbility = PassiveID::UnstoppableAssault;
+    tonyPhase2.newNaturalAbility = NaturalID::UnstoppableAssault;
     
     tonyPhase2.newActiveAbilities.push_back(ActiveID::RealityCheck);
     tonyPhase2.newActiveAbilities.push_back(ActiveID::TheDeepEnd);

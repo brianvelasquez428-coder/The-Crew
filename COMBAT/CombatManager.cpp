@@ -27,7 +27,7 @@ void startBattle(std::vector<Entity*>& masterRoster, std::vector<Entity*>& playe
     }
     // -----------------------------------
     GameLog::Clear(); GameLog::Add("BATTLE START!");
-    std::vector<Entity*> combatants; std::vector<std::string> previouslyActiveTeamUps;
+    std::vector<Entity*> combatants; std::vector<TeamUpSkill> previouslyActiveTeamUps; // <--- FIXED TYPE
     bool battleIsActive = true; int roundCounter = 1; int teamMomentum = 0;       
 
     for (Entity* p : playerTeam) { p->calculateActiveStats(); applyStartOfBattlePassives(*p); }
@@ -46,13 +46,23 @@ void startBattle(std::vector<Entity*>& masterRoster, std::vector<Entity*>& playe
             if (!isEnemy && !isPlayer) continue; 
             character->usedActiveAbilityThisTurn = false; 
 
-            if (character->hasStatus(StatusType::Stun)) { handleStunnedCharacter(character, playerTeam, enemyTeam, teamMomentum); continue; }
-            triggerPassives(*character); printCharacterStats(character); 
+            if (character->hasStatus(StatusCategory::HardCC)) { handleStunnedCharacter(character, playerTeam, enemyTeam, teamMomentum); continue; }
+
+            // --- REVERTED: PASSIVES EVALUATE AT THE START OF THE TURN ---
+            // You get your buffs and heals immediately!
+            if (isPlayer) applyNaturalPassives(*character, playerTeam);
+            else applyNaturalPassives(*character, enemyTeam);
+            // ------------------------------------------------------------
+
+            printCharacterStats(character); 
 
             if (!character->isBoss && isPlayer) executePlayerTurn(character, playerTeam, enemyTeam, masterRoster, masterTeamUps, inventory, wallet, teamMomentum, previouslyActiveTeamUps, battleIsActive, canFlee);
-            else executeEnemyTurn(character, playerTeam, enemyTeam, wallet, teamMomentum); // THE FIX: Passed Momentum
+            else executeEnemyTurn(character, playerTeam, enemyTeam, wallet, teamMomentum); 
 
             if (!battleIsActive) break;
+            
+            // (Make sure applyNaturalPassives is deleted from down here!)
+            
             for (Entity* enemy : enemyTeam) if (enemy->isAlive) enemy->checkPhaseTransition();
             if (checkBattleEnd(playerTeam, enemyTeam, masterRoster)) { battleIsActive = false; break; }
             if (battleIsActive) pauseForPlayer(isPlayer, playerTeam, enemyTeam, teamMomentum);

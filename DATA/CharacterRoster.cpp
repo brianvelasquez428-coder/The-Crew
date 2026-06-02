@@ -4,7 +4,7 @@
 
 static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string name, LifeStage stage, bool isBoss,
                       int hp, int atk, int def, int spd, int biq, int siq,
-                      PassiveID naturalAbility) {
+                      NaturalID naturalAbility) {
     Entity e(name, stage, isBoss);
     e.internalID = internalID; e.actorID = actorID; 
     e.maxHP = hp; e.currentHP = hp;
@@ -24,7 +24,7 @@ static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string n
 
 // --- YOUNG CREW (LEVEL 1) ---
 Entity buildYoungBrian() {
-    Entity brian = buildBaseStats(EntityID::YoungBrian, ActorID::Brian, "Brian", LifeStage::Young, false, 55, 15, 11, 13, 9, 15, PassiveID::ScrewDat);
+    Entity brian = buildBaseStats(EntityID::YoungBrian, ActorID::Brian, "Brian", LifeStage::Young, false, 55, 15, 11, 13, 9, 15, NaturalID::ScrewDat);
     brian.level = 1; 
     
     // Default to Support Stance natively 
@@ -38,7 +38,7 @@ Entity buildYoungBrian() {
 }
 
 Entity buildYoungPaul() {
-    Entity paul = buildBaseStats(EntityID::YoungPaul, ActorID::Paul, "Paul", LifeStage::Young, false, 39, 11, 8, 12, 15, 9, PassiveID::CrashOut);
+    Entity paul = buildBaseStats(EntityID::YoungPaul, ActorID::Paul, "Paul", LifeStage::Young, false, 39, 11, 8, 12, 15, 9, NaturalID::CrashOut);
     paul.level = 1;
     paul.combatMenu.push_back(getMove(MoveID::OneTwoPunch)); 
     paul.combatMenu.push_back(getMove(MoveID::Guard)); 
@@ -46,7 +46,7 @@ Entity buildYoungPaul() {
 }
 
 Entity buildYoungVince() {
-    Entity vince = buildBaseStats(EntityID::YoungVince, ActorID::Vince, "Vince", LifeStage::Young, false, 65, 14, 11, 8, 10, 8, PassiveID::Mediator);
+    Entity vince = buildBaseStats(EntityID::YoungVince, ActorID::Vince, "Vince", LifeStage::Young, false, 65, 14, 11, 8, 10, 8, NaturalID::Mediator);
     vince.level = 1;
     vince.combatMenu.push_back(getMove(MoveID::Shove)); 
     vince.combatMenu.push_back(getMove(MoveID::Guard)); 
@@ -55,7 +55,7 @@ Entity buildYoungVince() {
 
 // Other characters
 Entity buildYoungJoe() {
-    Entity joe = buildBaseStats(EntityID::YoungJoe, ActorID::Joe, "Joe", LifeStage::Young, false, 46, 14, 8, 14, 11, 11, PassiveID::CrashOut);
+    Entity joe = buildBaseStats(EntityID::YoungJoe, ActorID::Joe, "Joe", LifeStage::Young, false, 46, 14, 8, 14, 11, 11, NaturalID::CrashOut);
     joe.level = 1;
 
     joe.combatMenu.push_back(getMove(MoveID::Windmill));
@@ -64,7 +64,7 @@ Entity buildYoungJoe() {
 }
 
 Entity buildYoungJustin() {
-    Entity justin = buildBaseStats(EntityID::YoungJustin, ActorID::Justin, "Justin", LifeStage::Young, false, 59, 10, 11, 14, 11, 8, PassiveID::Mediator);
+    Entity justin = buildBaseStats(EntityID::YoungJustin, ActorID::Justin, "Justin", LifeStage::Young, false, 59, 10, 11, 14, 11, 8, NaturalID::Mediator);
     justin.level = 1;
 
     justin.combatMenu.push_back(getMove(MoveID::Tackle));
@@ -74,7 +74,7 @@ Entity buildYoungJustin() {
 
 // --- ADULT CREW (LEVEL 50) ---
 Entity buildBrian() {
-    Entity brian = buildBaseStats(EntityID::AdultBrian, ActorID::Brian, "Brian", LifeStage::Adult, false, 850, 190, 180, 180, 60, 100, PassiveID::ScrewDat);
+    Entity brian = buildBaseStats(EntityID::AdultBrian, ActorID::Brian, "Brian", LifeStage::Adult, false, 850, 190, 180, 180, 60, 100, NaturalID::ScrewDat);
     brian.level = 50; 
     brian.activeAbilities.push_back(ActiveID::AnalyzeWeakness);
     
@@ -93,7 +93,7 @@ Entity buildBrian() {
 }
 
 Entity buildPaul() {
-    Entity paul = buildBaseStats(EntityID::AdultPaul, ActorID::Paul, "Paul", LifeStage::Adult, false, 650, 150, 140, 140, 100, 60, PassiveID::CrashOut);
+    Entity paul = buildBaseStats(EntityID::AdultPaul, ActorID::Paul, "Paul", LifeStage::Adult, false, 650, 150, 140, 140, 100, 60, NaturalID::CrashOut);
     paul.level = 50;
     paul.activeAbilities.push_back(ActiveID::Adrenaline); paul.activeAbilities.push_back(ActiveID::RecklessAbandon);
 
@@ -105,7 +105,7 @@ Entity buildPaul() {
 }
 
 Entity buildVince() {
-    Entity vince = buildBaseStats(EntityID::AdultVince, ActorID::Vince, "Vince", LifeStage::Adult, false, 999, 170, 190, 100, 65, 50, PassiveID::Mediator);
+    Entity vince = buildBaseStats(EntityID::AdultVince, ActorID::Vince, "Vince", LifeStage::Adult, false, 1000, 170, 190, 100, 65, 50, NaturalID::Mediator);
     vince.level = 50;
     vince.activeAbilities.push_back(ActiveID::Taunt);
 

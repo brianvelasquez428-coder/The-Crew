@@ -3,7 +3,7 @@
 
 static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string name, LifeStage stage, bool isBoss,
                       int hp, int atk, int def, int spd, int biq, int siq,
-                      PassiveID naturalAbility) {
+                      NaturalID naturalAbility) {
     Entity e(name, stage, isBoss);
     e.internalID = internalID; e.actorID = actorID; 
     e.maxHP = hp; e.currentHP = hp;
@@ -23,7 +23,7 @@ static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string n
 
 Entity buildScrawnyThug() {
     Entity thug = buildBaseStats(EntityID::ScrawnyThug, ActorID::Enemy, "Scrawny Thug", LifeStage::Young, false,
-                                   20, 6, 3, 5, 2, 3, PassiveID::None);
+                                   20, 6, 3, 5, 2, 3, NaturalID::None);
 
     thug.combatMenu.push_back( getMove(MoveID::Strike));
     thug.combatMenu.push_back( getMove(MoveID::Guard));
@@ -34,7 +34,7 @@ Entity buildScrawnyThug() {
 
 Entity buildStreetThug() {
     Entity thug = buildBaseStats(EntityID::StreetThug, ActorID::Enemy, "Street Thug", LifeStage::Young, false,
-                                   20, 6, 3, 5, 2, 3, PassiveID::None);
+                                   20, 6, 3, 5, 2, 3, NaturalID::None);
 
     thug.combatMenu.push_back( getMove(MoveID::Strike));
     thug.combatMenu.push_back( getMove(MoveID::Guard));

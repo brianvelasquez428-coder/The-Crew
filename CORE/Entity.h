@@ -10,8 +10,11 @@ enum class Effect {
     None, RestoreStamina, DefenseScalingDamage, ApplyBleed, IgnoreDefense,
     DefenseBuff40, HealAndCleanse, LowerPriority, StrikeDefenseDebuff, StrikeUlt,
     SlowEnemy, HoldLineShield, PrecisionStrikeDebuff, StaminaStrip, P2BasicDebuff,
-    ClutchGrab, LightsOutStun
+    ClutchGrab, LightsOutStun, SelfAttackBuff10
 };
+
+// ---> NEW: The 3 Timing Windows <---
+enum class EffectTiming { OnCast, PreHit, PostHit };
 
 // --- THE NEW ROSTER IDENTIFIERS ---
 // EntityID handles backend logic like level-up stats and specific boss phases
@@ -37,12 +40,17 @@ enum class StatusID {
     Bleed, GuardBreak, Hardened, Slowed, GuardBroken, BoggedDown, 
     PrecisionDEFDrop, PrecisionBIQDrop, WindKnockedOut, Stunned, 
     DemolitionistATK, DemolitionistBIQ, CrashOutATK, CrashOutDEF, 
-    UnstoppableATK, UnstoppableSPD, LightFeet, HeavyHands, IronWill 
+    UnstoppableATK, UnstoppableSPD, LightFeet, HeavyHands, IronWill,
+    CrashOutHitBuffATK, CrashOutHitBuffSPD, CrashOutExhaustion, StunImmunity,
+    SparringDEF, BasicAttackBuff // <--- ADD THIS HERE
+};
+
+enum class NaturalID { 
+    None, ScrewDat, CrashOut, Mediator, Sparring, UnstoppableAssault 
 };
 
 enum class PassiveID { 
-    None, ScrewDat, CrashOut, Mediator, Sparring, UnstoppableAssault, 
-    LightOnTheFeet, HeavyHands, IronWill, SlippingPunches, Combo 
+    None, LightOnTheFeet, HeavyHands, IronWill, SlippingPunches, Combo 
 };
 
 enum class ActiveID { 
@@ -50,16 +58,26 @@ enum class ActiveID {
     AnalyzeWeakness, RecklessAbandon, RealityCheck 
 };
 
-enum class StatusType { StatModifier, Bleed, Stun, Taunt, StaminaPenalty, StunImmune };
+// We replace StatusType with StatusCategory for broader UI formatting
+enum class StatusCategory { Buff, Debuff, DoT, HardCC, Special };
 enum class StatName { None, ATK, DEF, SPD, BIQ, SIQ };
 
+// The new Data-Driven Payload
 struct StatusEffect {
     StatusID id;
-    StatusType type;
-    StatName targetStat;
-    int value;               
-    int duration;            
-    bool isStackable;    
+    std::string name;           
+    StatusCategory category;
+    
+    StatName targetStat;        
+    int statModifier;           
+    
+    int dotDamage;              
+    bool causesStun;            
+    bool causesTaunt;           
+    bool halvesStaminaRegen;    
+    
+    int duration;               
+    bool isStackable;
 };
 
 std::string getStatusName(StatusID id);
@@ -96,16 +114,20 @@ struct Move {
     std::string name;
     int staminaCost;
     int hitCount;
-    MoveCategory category; // <--- Swapped from string to Enum
+    float powerMultiplier;
     MoveTarget target;
     Effect effect;
-    float powerMultiplier;
+    
+    EffectTiming effectTiming; // <--- NEW: Add this right below Effect!
+    
+    MoveCategory category;
+    bool ignoresEvasion;
 };
 
 struct PhaseData {
     int thresholdHP; std::string transitionText;
     int newAttack; int newDefense; int newSpeed; int newBIQ; int newSIQ;
-    PassiveID newNaturalAbility;
+    NaturalID newNaturalAbility;
     std::vector<PassiveID> newPassiveAbilities; 
     std::vector<ActiveID> newActiveAbilities;
     std::vector<Move> newCombatMenu;
@@ -133,7 +155,9 @@ public:
     
     int maxStamina; int currentStamina; int staminaRegen;
     
-    PassiveID naturalAbility; bool usedActiveNatural;          
+    NaturalID naturalAbility; bool naturalActiveUsedThisBattle;  
+    bool hasCrashedOut; 
+    bool mediatorAwakened;      
     PassiveID hiddenAbility;  bool usedActiveAbilityThisTurn;           
     std::vector<PassiveID> passiveAbilities;       
     std::vector<ActiveID> activeAbilities;       
@@ -149,21 +173,29 @@ public:
     
     // ---> FIX: Replaced std::string with Entity*
     bool isAlive; bool isGrabbed; Entity* grabbedBy;       
-    int shieldHP; bool isCriticalOnlyShield;       
-    int hitNullificationStacks;     
-    int screwDatStacks; int screwDatDecayTimer;          
+    int shieldHP; bool isCriticalOnlyShield;
+    int hitNullificationStacks;
+    
+    int screwDatStacks;        // Tracks the decaying Strike Ultimate power
+    int supportHealStacks;     // NEW: Tracks the permanent Support heal
+    int screwDatDecayTimer;
+    
     int tempDamageBonus;                  
     int totalDamageTaken = 0; int totalDodges = 0;     
     bool hasScrapedKneesBadge = false; bool hasStreetSmartBadge = false;     
     
     std::vector<StatusEffect> activeStatuses;
     void addStatus(StatusEffect s);
-    bool hasStatus(StatusType type);
+    bool hasStatus(StatusCategory category);
     bool hasStatusID(StatusID id);
-    void removeStatusByType(StatusType type);
+    void removeStatusByType(StatusCategory category);
     
     Entity(std::string spawnName, LifeStage spawnStage, bool spawnIsBoss); 
     int takeDamage(int rawDamage, bool isCritical);         
+    // --- NEW: EVENT HOOKS ---
+    int getDamageReduction();
+    void triggerOnHitPassives();
+    // ------------------------       
     void healHP(int amount);                                 
     void endOfTurnUpdate();                                  
     void regenerateStamina();                                
@@ -174,7 +206,8 @@ public:
     bool executeTeamUp(Entity& partner1, Entity& partner2, int staminaCost);        
     void calculateActiveStats();                             
     void checkBadges();     
-    std::vector<StatusPopup> pendingPopups; // <--- NEW: Stores text to animate
-    bool checkPhaseTransition();            // <--- CHANGED: From void to bool                           
-    void resetStats();                                   
+    std::vector<StatusPopup> pendingPopups;      // <--- ALREADY THERE
+    std::vector<std::string> pendingLogMessages; // <--- ADD THIS FOR COMBAT LOG DELAYS
+    bool checkPhaseTransition();            
+    void resetStats();                                                                      
 };

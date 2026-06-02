@@ -18,9 +18,9 @@ void pauseForPlayer(bool wasPlayerTurn, std::vector<Entity*>& playerTeam, std::v
 void printCharacterStats(Entity* character);
 void handleStunnedCharacter(Entity* character, std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, int momentum);
 
-std::vector<Entity*> requestPlayerTargets(Entity* attacker, Move selectedMove, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& playerTeam);
+std::vector<Entity*> requestPlayerTargets(Entity* attacker, const Move& selectedMove, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& playerTeam);
 void manageParty(std::vector<Entity*>& masterRoster, std::vector<Entity*>& activeParty);
 
-void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& masterRoster, std::vector<TeamUpSkill>& masterTeamUps, int inventory[3], int& wallet, int& teamMomentum, std::vector<std::string>& previouslyActiveTeamUps, bool& battleIsActive, bool canFlee);
+void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& masterRoster, std::vector<TeamUpSkill>& masterTeamUps, int* inventory, int& wallet, int& teamMomentum, std::vector<TeamUpSkill>& previouslyActiveTeamUps, bool& battleIsActive, bool canFlee);
 
 bool checkBattleEnd(std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& masterRoster);
