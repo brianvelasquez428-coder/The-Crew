@@ -7,6 +7,7 @@
 #include "MoveDatabase.h" 
 #include "AbilityDatabase.h" 
 #include "../Systems/SaveManager.h" 
+#include "../CORE/GlobalConstants.h" // <--- Add this with your other includes!
 #include <string>
 #include <ctime>
 #include <algorithm>
@@ -16,7 +17,7 @@
 std::map<ActorID, Texture2D> globalSprites;
 std::map<ActorID, Texture2D> globalAttackSprites;
 
-enum GameScreen { TITLE, HUB, RESTING, STORE, PARTY, CUSTOMIZE, ENCYCLOPEDIA, BATTLE };
+enum GameScreen { TITLE, HUB, MENU, RESTING, STORE, PARTY, CUSTOMIZE, ENCYCLOPEDIA, BATTLE, STORY_INTRO, EXPLORATION };
 
 // --- TRANSLATION HELPERS ---
 
@@ -26,6 +27,8 @@ std::string getActorName(ActorID id) {
         case ActorID::Paul: return "Paul";
         case ActorID::Vince: return "Vince";
         case ActorID::Tony: return "Tony";
+        case ActorID::ScrawnyThug: return "Scrawny Thug";
+        case ActorID::StreetThug: return "Street Thug";
         case ActorID::Enemy: return "Enemy";
         default: return "Unknown";
     }
@@ -88,12 +91,17 @@ int main() {
     srand(time(NULL)); InitWindow(1920, 1080, "The Crew - Pre-Alpha"); SetTargetFPS(60);
 
     // --- NEW: LOAD TEXTURES ---
-    Texture2D texBrian = LoadTexture("Brian.png");
+    Texture2D texBrian = LoadTexture("BmanRightFaceRightLight.png");
     Texture2D texPaulIdle = LoadTexture("P_RightFaceRightLight.png");
     Texture2D texPaulPunch = LoadTexture("P_RightPunchRightLight.png");
-    Texture2D texVince = LoadTexture("Vince.png");
+    Texture2D texVince = LoadTexture("BobbyRightFaceRightLight.png");
     Texture2D texJoe = LoadTexture("Joe.png");
     Texture2D texJustin = LoadTexture("Justin.png");
+
+    Texture2D texTony = LoadTexture("TonyLeftLight.png");
+
+    Texture2D texBully = LoadTexture("Bully1LeftLight.png");
+    Texture2D texThug = LoadTexture("Thug1LeftLight.png");
     
     // Set to Point filtering so the pixel art doesn't blur when stretched
     SetTextureFilter(texBrian, TEXTURE_FILTER_POINT);
@@ -103,13 +111,23 @@ int main() {
     SetTextureFilter(texJoe, TEXTURE_FILTER_POINT);
     SetTextureFilter(texJustin, TEXTURE_FILTER_POINT);
 
+    SetTextureFilter(texTony, TEXTURE_FILTER_POINT);
+
+    SetTextureFilter(texBully, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texThug, TEXTURE_FILTER_POINT);
+
     globalSprites[ActorID::Brian] = texBrian;
     globalSprites[ActorID::Paul] = texPaulIdle;
     globalAttackSprites[ActorID::Paul] = texPaulPunch;
     globalSprites[ActorID::Vince] = texVince;
     globalSprites[ActorID::Joe] = texJoe;
     globalSprites[ActorID::Justin] = texJustin;
-    // --------------------------
+
+    globalSprites[ActorID::Tony] = texTony;
+    
+    globalSprites[ActorID::ScrawnyThug] = texBully;
+    globalSprites[ActorID::StreetThug] = texThug;
+
 
     std::vector<Entity*> activeParty(3, nullptr);
     std::vector<Entity*> reserves(3, nullptr);
@@ -165,6 +183,109 @@ int main() {
     GameScreen currentScreen = TITLE;
     bool showSavePopup = false;
 
+    // --- STORY & EXPLORATION VARIABLES ---
+    int storyCutsceneState = 0; 
+    int playerFacing = 1;
+    const int TILE_SIZE = 8; 
+
+    // THE FIX: This remembers where we were before opening a sub-menu!
+    GameScreen previousScreen = HUB;
+
+    int currentActiveMap = 0; // 0 = Main Bar, 1 = Bathroom, 2 = Outside
+
+    // --- MAP 0: THE MAIN BAR (40x18) ---
+    int barMap[18][40] = {
+        {1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+        {1,1,1,1,1,1,1,1, 1,1,5,5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}, // 5 = North Door
+        {1,1,1,1,1,1,1,1, 1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1},
+        {1,1,1,1,1,1,1,1, 1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1},
+        {1,1,1,1,1,1,1,1, 1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,0,0,0,1,1,1,1,1,1,1},
+        {1,1,1,1,1,1,1,1, 1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,0,0,0,1,3,3,1,1,1,1}, // 3 = Bathroom
+        {1,1,1,1,1,1,1,1, 1,1,2,2,2,2,2,2,2,2,0,0,0,0,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,1,1},
+        {1,1,1,1,1,1,1,1, 1,1,2,2,2,2,2,2,2,2,0,0,0,0,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,8,1}, // 8 = East Door
+        {1,1,1,1,1,1,1,1, 1,1,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,8,1}, // 8 = East Door
+        {1,1,1,1,1,1,1,1, 1,1,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1},
+        {1,1,1,1,1,1,1,1, 1,1,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,0,0,0,0,0,1,1},
+        {1,1,1,1,1,1,1,1, 1,1,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,0,0,0,0,0,1,1},
+        {1,1,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,0,0,0,0,0,1,1}, 
+        {1,1,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,0,0,0,0,0,0,0,1,1}, 
+        {1,1,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1}, 
+        {1,1,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1}, 
+        {1,1,1,1,1,1,1,1, 1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}, // 7 = South Door
+        {1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1} 
+    };
+
+    // --- MAP 1: THE BATHROOM (12x12) ---
+    int bathroomMap[12][12] = {
+        {1,1,1,1,1,1,1,1,1,1,1,1},
+        {1,1,1,1,1,1,1,1,1,1,1,1},
+        {1,1,0,0,0,0,0,0,0,0,1,1},
+        {1,1,0,0,0,0,0,0,0,0,1,1},
+        {1,1,0,0,0,0,0,0,0,0,1,1},
+        {1,1,0,0,0,0,0,0,0,0,1,1},
+        {1,1,0,0,0,0,0,0,0,0,1,1},
+        {1,1,0,0,0,0,0,0,0,0,1,1},
+        {1,1,0,0,0,0,0,0,0,0,1,1},
+        {1,1,1,1,1,4,4,1,1,1,1,1}, // 4 = Door back to Bar!
+        {1,1,1,1,1,1,1,1,1,1,1,1},
+        {1,1,1,1,1,1,1,1,1,1,1,1}
+    };
+
+    // --- MAP 2: OUTSIDE (50x30) ---
+    int outsideMap[30][50] = {
+        {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,6,6,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1}, // 6 = Enter North
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1}, 
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1}, // 10 = Enter East
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1}, // 10 = Enter East
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,9,9,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1}, // 9 = Enter South
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+        {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
+    };
+
+    // --- FIX: LAMBDA HELPER FUNCTION ---
+    auto GetTileAt = [&](int gridX, int gridY) {
+        if (currentActiveMap == 0) { // Main Bar
+            if (gridX >= 0 && gridX < 40 && gridY >= 0 && gridY < 18) return barMap[gridY][gridX];
+        } 
+        else if (currentActiveMap == 1) { // Bathroom
+            if (gridX >= 0 && gridX < 12 && gridY >= 0 && gridY < 12) return bathroomMap[gridY][gridX];
+        }
+        else if (currentActiveMap == 2) { // NEW: Outside Map
+            if (gridX >= 0 && gridX < 50 && gridY >= 0 && gridY < 30) return outsideMap[gridY][gridX];
+        }
+        return 1; 
+    };
+
+    Vector2 playerWorldPos = { (float)(22 * TILE_SIZE), (float)(10 * TILE_SIZE) };
+    float playerSpeed = 80.0f; 
+
+    Camera2D exploreCamera = { 0 };
+    exploreCamera.zoom = 6.0f; 
+    exploreCamera.offset = { 1920 / 2.0f, 1080 / 2.0f };
+
     while (!WindowShouldClose()) {
         bool bgDisabled = showDetailsPopup || showCustomSelect || showSavePopup; 
 
@@ -173,7 +294,7 @@ int main() {
             
             DrawText("THE CREW", 1920/2 - MeasureText("THE CREW", 80)/2, 200, 80, RED);
             // ---> NEW: Version Subtitle <---
-            DrawText("v1.2 Pre-Alpha", 1920/2 - MeasureText("v1.2 Pre-Alpha", 30)/2, 290, 30, GRAY);
+            DrawText("v1.3 Pre-Alpha", 1920/2 - MeasureText("v1.3 Pre-Alpha", 30)/2, 290, 30, GRAY);
             
             bool hasSave = SaveSystem::DoesSaveExist(); int startX = 1920/2 - 200;
             if (hasSave) {
@@ -189,27 +310,44 @@ int main() {
         }
         else if (currentScreen == HUB) {
             BeginDrawing(); ClearBackground(DARKBLUE); DrawText("THE HIDEOUT", 100, 100, 60, WHITE); DrawText(TextFormat("Crew Funds: $%d", wallet), 100, 200, 30, GREEN);
-            if (DrawMenuButton({100, 300, 400, 60}, "1. Hit the Streets", GRAY, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_ONE))) { selectedEncounter = 1; currentScreen = BATTLE; }
-            if (DrawMenuButton({100, 380, 400, 60}, "2. Visit the Bodega", GRAY, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_TWO))) currentScreen = STORE;
+            // Inside the currentScreen == HUB block:
+            if (DrawMenuButton({100, 300, 400, 60}, "0. Enter Story Mode", GOLD, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_ZERO))) { 
+                storyCutsceneState = 0; 
+                currentActiveMap = 0; // <--- FIX: Always reset to the Main Bar!
+                currentScreen = STORY_INTRO; 
+            }
+            // Note: You may need to shift your other Hub buttons down by 80 pixels so they don't overlap!
+            if (DrawMenuButton({100, 380, 400, 60}, "1. Hit the Streets", GRAY, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_ONE))) { selectedEncounter = 1; currentScreen = BATTLE; }
+            if (DrawMenuButton({100, 460, 400, 60}, "2. Visit The Bodega", GOLD, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_TWO))) { 
+                previousScreen = HUB; // <--- ADD THIS
+                currentScreen = STORE; 
+            }
             
-            if (DrawMenuButton({100, 460, 400, 60}, "3. Rest (Full Heal)", GOLD, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_THREE))) {
+            if (DrawMenuButton({100, 540, 400, 60}, "3. Rest (Full Heal)", GOLD, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_THREE))) {
                 for (Entity* p : activeParty) if(p) { p->currentHP = p->maxHP; p->currentStamina = p->maxStamina; p->isAlive = true; }
                 for (Entity* p : reserves) if(p) { p->currentHP = p->maxHP; p->currentStamina = p->maxStamina; p->isAlive = true; }
                 for (Entity* p : bench) if(p) { p->currentHP = p->maxHP; p->currentStamina = p->maxStamina; p->isAlive = true; }
                 currentScreen = RESTING; 
             }
 
-            if (DrawMenuButton({100, 540, 400, 60}, "4. Manage Crew", GRAY, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_FOUR))) currentScreen = PARTY;
-            if (DrawMenuButton({100, 620, 400, 60}, "5. Fight Boss (Tony)", MAROON, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_FIVE))) { selectedEncounter = 2; currentScreen = BATTLE; }
-            if (DrawMenuButton({100, 700, 400, 60}, "6. Training Sandbox", ORANGE, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_SIX))) { selectedEncounter = 3; currentScreen = BATTLE; }
+            if (DrawMenuButton({100, 620, 400, 60}, "4. Manage Party", GRAY, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_ONE))) { 
+                previousScreen = HUB; // <--- ADD THIS
+                currentScreen = PARTY; 
+            }
+            if (DrawMenuButton({100, 700, 400, 60}, "5. Fight Boss (Tony)", MAROON, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_FIVE))) { selectedEncounter = 2; currentScreen = BATTLE; }
+            if (DrawMenuButton({100, 780, 400, 60}, "6. Training Sandbox", ORANGE, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_SIX))) { selectedEncounter = 3; currentScreen = BATTLE; }
             
-            if (DrawMenuButton({100, 780, 400, 60}, "7. Save Progress", DARKGREEN, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_SEVEN))) { 
+            if (DrawMenuButton({100, 860, 400, 60}, "7. Save Progress", DARKGREEN, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_SEVEN))) { 
                 SaveSystem::SaveGame(wallet, inventory); 
                 showSavePopup = true; 
             }
             
-            if (DrawMenuButton({100, 860, 400, 60}, "8. The Archives", PURPLE, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_EIGHT))) currentScreen = ENCYCLOPEDIA;
-            if (DrawMenuButton({100, 940, 400, 60}, "9. Quit to Title", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_NINE))) currentScreen = TITLE;
+            // Replace your existing "8. The Archives" line in the HUB with this:
+            if (DrawMenuButton({100, 940, 400, 60}, "8. The Archives", PURPLE, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_EIGHT))) {
+                previousScreen = HUB;
+                currentScreen = ENCYCLOPEDIA;
+            }
+            if (DrawMenuButton({100, 1020, 400, 60}, "9. Quit to Title", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_NINE))) currentScreen = TITLE;
 
             // --- NEW: DEBUG RESET BUTTON ---
             if (DrawMenuButton({1400, 940, 400, 60}, "[DEBUG] Reset Characters", MAROON, bgDisabled)) {
@@ -249,6 +387,494 @@ int main() {
             }
             EndDrawing();
         }
+        else if (currentScreen == MENU) { 
+            BeginDrawing();
+            
+            // Faded black background so the game is still visible behind it
+            ClearBackground(Fade(BLACK, 0.85f)); 
+
+            DrawText("QUICK MENU", 100, 50, 40, WHITE);
+            DrawText("[ Choose an option or press TAB to Resume ]", 100, 100, 20, LIGHTGRAY);
+
+            // 1. Resume Game 
+            if (DrawMenuButton({100, 150, 400, 60}, "Resume Game", GREEN, bgDisabled) || (!bgDisabled && IsKeyReleased(KEY_TAB))) { 
+                currentScreen = EXPLORATION; 
+            }
+            
+            // 2. Manage Party 
+            if (DrawMenuButton({100, 230, 400, 60}, "Manage Party", ORANGE, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_TWO))) { 
+                previousScreen = MENU; 
+                currentScreen = PARTY; 
+            }
+            
+            // 3. Store
+            if (DrawMenuButton({100, 310, 400, 60}, "Visit The Bodega", GOLD, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_THREE))) { 
+                previousScreen = MENU; 
+                currentScreen = STORE; 
+            }
+            
+            // 4. Archive 
+            if (DrawMenuButton({100, 390, 400, 60}, "The Archive", SKYBLUE, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_FOUR))) {
+                previousScreen = MENU;
+                currentScreen = ENCYCLOPEDIA;
+            }
+            
+            // 5. Save Game 
+            if (DrawMenuButton({100, 470, 400, 60}, "Save Game", LIGHTGRAY, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_FIVE))) {
+                SaveSystem::SaveGame(wallet, inventory); 
+                showSavePopup = true; 
+            }
+
+            // 6. Return to Hub
+            if (DrawMenuButton({100, 550, 400, 60}, "Return to Hub", DARKPURPLE, bgDisabled) || (!bgDisabled && IsKeyPressed(KEY_SIX))) {
+                currentScreen = HUB;
+            }
+            
+            // Draw Save Popup if active
+            if (showSavePopup) {
+                DrawRectangle(0, 0, 1920, 1080, Fade(BLACK, 0.8f)); 
+                DrawRectangle(1920/2 - 250, 1080/2 - 150, 500, 300, DARKGRAY); 
+                DrawRectangleLinesEx({1920/2 - 250, 1080/2 - 150, 500, 300}, 4, GREEN); 
+                DrawText("GAME SAVED!", 1920/2 - MeasureText("GAME SAVED!", 40)/2, 1080/2 - 50, 40, GREEN);
+                
+                if (DrawMenuButton({1920/2 - 100, 1080/2 + 50, 200, 60}, "OK [Enter]", DARKGREEN, false) || IsKeyReleased(KEY_ENTER)) {
+                    showSavePopup = false;
+                }
+            }
+
+            EndDrawing();
+        }
+        else if (currentScreen == STORY_INTRO) {
+            if (storyCutsceneState == 0) {
+                BeginDrawing(); ClearBackground(BLACK);
+                DrawText("One day, at a local bar...", 1920/2 - MeasureText("One day, at a local bar...", 40)/2, 1080/2, 40, WHITE);
+                DrawText("[ CLICK TO CONTINUE ]", 1920/2 - MeasureText("[ CLICK TO CONTINUE ]", 20)/2, 1080/2 + 60, 20, GRAY);
+                if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) || IsKeyReleased(KEY_ENTER)) storyCutsceneState++;
+                EndDrawing();
+            } 
+            else {
+                // --- 1. CUTSCENE CAMERA LOGIC ---
+                // Center camera roughly around row 10, col 14
+                Vector2 focusPos = { (float)(14 * TILE_SIZE) + 4.0f, (float)(10 * TILE_SIZE) + 12.0f }; 
+                if (activeParty[0] != nullptr) {
+                    if (activeParty[0]->actorID == ActorID::Paul) focusPos = { (float)(18 * TILE_SIZE) + 4.0f, (float)(10 * TILE_SIZE) + 12.0f };
+                    else if (activeParty[0]->actorID == ActorID::Vince) focusPos = { (float)(10 * TILE_SIZE) + 4.0f, (float)(10 * TILE_SIZE) + 12.0f };
+                }
+                exploreCamera.target = focusPos;
+
+                // --- SMART CAMERA CLAMP ---
+                float minX = 0; float minY = 0;
+                float maxX = 40 * TILE_SIZE; float maxY = 18 * TILE_SIZE;
+                float viewWidth = 1920.0f / exploreCamera.zoom; float viewHeight = 1080.0f / exploreCamera.zoom;
+
+                if ((maxX - minX) < viewWidth) {
+                    exploreCamera.target.x = minX + ((maxX - minX) / 2.0f);
+                } else {
+                    if (exploreCamera.target.x - (viewWidth / 2.0f) < minX) exploreCamera.target.x = minX + (viewWidth / 2.0f);
+                    if (exploreCamera.target.x + (viewWidth / 2.0f) > maxX) exploreCamera.target.x = maxX - (viewWidth / 2.0f);
+                }
+
+                if ((maxY - minY) < viewHeight) {
+                    exploreCamera.target.y = minY + ((maxY - minY) / 2.0f);
+                } else {
+                    if (exploreCamera.target.y - (viewHeight / 2.0f) < minY) exploreCamera.target.y = minY + (viewHeight / 2.0f);
+                    if (exploreCamera.target.y + (viewHeight / 2.0f) > maxY) exploreCamera.target.y = maxY - (viewHeight / 2.0f);
+                }
+
+                // --- 2. DRAW THE SCENE ---
+                BeginDrawing(); ClearBackground(BLACK);
+                
+                // CRITICAL: This is what applies your 6.0x zoom to the map!
+                BeginMode2D(exploreCamera); 
+
+                for (int y = 0; y < 18; y++) {
+                    for (int x = 0; x < 40; x++) {
+                        Rectangle tileRec = { (float)(x * TILE_SIZE), (float)(y * TILE_SIZE), (float)TILE_SIZE, (float)TILE_SIZE };
+                        int tileVal = barMap[y][x]; 
+                        
+                        if (tileVal == 1) { 
+                            DrawRectangleRec(tileRec, DARKGRAY); DrawRectangleLinesEx(tileRec, 1, BLACK);
+                        } else if (tileVal == 2) { 
+                            DrawRectangleRec(tileRec, BROWN); 
+                        } else if (tileVal == 3 || tileVal == 4) { 
+                            DrawRectangleRec(tileRec, DARKBLUE); 
+                        } else if (tileVal >= 5 && tileVal <= 10) {
+                            DrawRectangleRec(tileRec, ORANGE);   
+                        } else { 
+                            DrawRectangleRec(tileRec, LIGHTGRAY);
+                        }
+                    }
+                }
+
+                // --- 3. DRAW THE CHARACTERS ---
+                Texture2D texBrian = globalSprites[ActorID::Brian];
+                Texture2D texPaul = globalSprites[ActorID::Paul];
+                Texture2D texVince = globalSprites[ActorID::Vince];
+                
+                // Establish a solid floor line
+                float groundY = (10 * TILE_SIZE) + 25.0f; 
+                float standardWidth = 10.0f;
+
+                // Helper lambda to cleanly draw and anchor cutscene characters
+                auto DrawCutsceneSprite = [&](Texture2D tex, float xPos, float yPosFloor, int facing) {
+                    float wOffset = (standardWidth - tex.width) / 2.0f;
+                    Rectangle src = {0, 0, (float)tex.width * facing, (float)tex.height};
+                    Rectangle dest = {xPos + wOffset, yPosFloor - tex.height, (float)tex.width, (float)tex.height};
+                    DrawTexturePro(tex, src, dest, {0,0}, 0.0f, WHITE);
+                };
+
+                DrawCutsceneSprite(texBrian, 14 * TILE_SIZE, groundY, 1);
+                DrawCutsceneSprite(texPaul, 18 * TILE_SIZE, groundY, -1);
+                DrawCutsceneSprite(texVince, 10 * TILE_SIZE, groundY, 1);
+
+                EndMode2D(); 
+
+                // --- 4. DRAW THE UI ---
+                DrawRectangle(360, 800, 1200, 200, Fade(BLACK, 0.8f)); 
+                DrawRectangleLinesEx({360, 800, 1200, 200}, 4, WHITE);
+                
+                // --- TYPEWRITER STATE VARIABLES ---
+                static int charsRevealed = 0;
+                static int lastCutsceneState = -1;
+                static double textRevealTimer = 0.0;
+                
+                // Reset the typewriter when the dialogue advances
+                if (storyCutsceneState != lastCutsceneState) {
+                    charsRevealed = 0;
+                    lastCutsceneState = storyCutsceneState;
+                    textRevealTimer = GetTime();
+                }
+                
+                // Increase revealed characters over time (0.02s per char is a standard speed)
+                if (GetTime() - textRevealTimer > 0.02) {
+                    charsRevealed++;
+                    textRevealTimer = GetTime();
+                }
+
+                // Helper Function: Formats text dynamically AND applies the typewriter limit
+                auto DrawDialogue = [](const char* name, Color nameColor, const char* dialogue, int revealedLimit) -> int {
+                    DrawText(name, 400, 830, 30, nameColor);
+                    
+                    int textX = 400; int textY = 880; int fontSize = 25;
+                    int maxLineWidth = 1120; 
+                    
+                    std::string textStr(dialogue);
+                    std::vector<std::string> lines;
+                    std::string currentLine = "";
+                    std::string word = "";
+                    
+                    // 1. Calculate the final paragraph layout behind the scenes
+                    for (size_t i = 0; i <= textStr.length(); i++) {
+                        if (i == textStr.length() || textStr[i] == ' ') {
+                            std::string testLine = currentLine.empty() ? word : currentLine + " " + word;
+                            
+                            if (MeasureText(testLine.c_str(), fontSize) > maxLineWidth) {
+                                lines.push_back(currentLine + " "); // Lock in the line with a trailing space
+                                currentLine = word;
+                            } else {
+                                currentLine = testLine;
+                            }
+                            word = "";
+                        } else {
+                            word += textStr[i];
+                        }
+                    }
+                    if (!currentLine.empty()) lines.push_back(currentLine);
+
+                    // 2. Draw the text line-by-line, stopping at the typewriter limit
+                    int charsLeft = revealedLimit;
+                    for (const std::string& line : lines) {
+                        if (charsLeft <= 0) break;
+                        
+                        std::string lineToDraw = line;
+                        if (lineToDraw.length() > charsLeft) {
+                            lineToDraw = lineToDraw.substr(0, charsLeft);
+                        }
+                        
+                        DrawText(lineToDraw.c_str(), textX, textY, fontSize, WHITE);
+                        textY += fontSize + 10;
+                        charsLeft -= line.length();
+                    }
+                    
+                    // Return the total string length so the click handler knows when it's done typing!
+                    return textStr.length(); 
+                };
+
+                // Track the length of the current line for the click logic
+                int totalCharsInLine = 0;
+
+                if (storyCutsceneState == 1) {
+                    totalCharsInLine = DrawDialogue("Vince:", SKYBLUE, "Something's off... The prices here jumped up a dollar from before! The waitresses also don't feel right.", charsRevealed);
+                } else if (storyCutsceneState == 2) {
+                    totalCharsInLine = DrawDialogue("Brian:", YELLOW, "Dawg, how do you even notice that? we ain't been here in a minute?", charsRevealed);
+                } else if (storyCutsceneState == 3) {
+                    totalCharsInLine = DrawDialogue("Paul:", RED, "Keep a cool head. Let's look around for clues first before we do anything we're going to regret. We don't need another bounty on our heads.", charsRevealed);
+                } else if (storyCutsceneState == 4) {
+                    totalCharsInLine = DrawDialogue("Brian:", YELLOW, "Bro, the fuck you mean 'our'?", charsRevealed);
+                } else if (storyCutsceneState == 5) {
+                    totalCharsInLine = DrawDialogue("Paul:", RED, "Trust.", charsRevealed);
+                }
+                
+                // Blink the [CLICK] prompt when typing is done
+                if (charsRevealed >= totalCharsInLine) {
+                    DrawText("[ CLICK ]", 1450, 950, 20, GRAY);
+                }
+
+                if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) || IsKeyReleased(KEY_ENTER)) {
+                    // If it's still typing, clicking instantly fills the box
+                    if (charsRevealed < totalCharsInLine) {
+                        charsRevealed = totalCharsInLine;
+                    } 
+                    // If it's done typing, clicking advances the cutscene
+                    else {
+                        storyCutsceneState++;
+                        if (storyCutsceneState > 5) {
+                            if (activeParty[0] != nullptr && activeParty[0]->actorID == ActorID::Paul) {
+                                playerWorldPos = { 18.0f * TILE_SIZE, 10.0f * TILE_SIZE };
+                                playerFacing = -1;
+                            }
+                            else if (activeParty[0] != nullptr && activeParty[0]->actorID == ActorID::Vince) {
+                                playerWorldPos = { 10.0f * TILE_SIZE, 10.0f * TILE_SIZE };
+                                playerFacing = 1; 
+                            }
+                            else {
+                                playerWorldPos = { 14.0f * TILE_SIZE, 10.0f * TILE_SIZE };
+                                playerFacing = 1; 
+                            }
+                            currentScreen = EXPLORATION;
+                        }
+                    }
+                }
+                EndDrawing();
+            }
+        }
+        else if (currentScreen == EXPLORATION) {
+            float dt = GetFrameTime(); 
+            
+            // --- NEW: SPRINT LOGIC ---
+            float currentSpeed = 50.0f; // New, slightly slower walking speed
+            if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+                currentSpeed = 110.0f; // Fast sprint speed!
+            }
+
+            float moveX = 0; float moveY = 0;
+
+            // Gather the raw input math first
+            if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP)) moveY -= currentSpeed * dt;
+            if (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN)) moveY += currentSpeed * dt;
+            if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) moveX -= currentSpeed * dt;
+            if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) moveX += currentSpeed * dt;
+
+            // THE FIX: Only update the visual facing direction if they are actively moving left or right!
+            // If they hold both, moveX is 0, so this gets skipped and they keep facing their original direction.
+            if (moveX < 0) {
+                playerFacing = -1;
+            } else if (moveX > 0) {
+                playerFacing = 1;
+            }
+
+            Texture2D playerTex = globalSprites[ActorID::Brian];
+            if (activeParty[0] != nullptr && globalSprites.count(activeParty[0]->actorID)) {
+                playerTex = globalSprites[activeParty[0]->actorID];
+            }
+            float pWidth = (float)playerTex.width;
+            float pHeight = (float)playerTex.height;
+
+            // --- THE FIX: UNIVERSAL PHYSICS FOOTPRINT ---
+            float standardWidth = 10.0f;  // Universal base width
+            float standardHeight = 25.0f; // Universal base height
+            
+            float hitBoxW = 6.0f; // The actual physics width
+            float hitBoxH = 4.0f; // The actual physics height (just the feet)
+
+            // Anchor the hitbox horizontally to the center, and vertically to the floor
+            Rectangle playerHitBox = {
+                playerWorldPos.x + (standardWidth / 2.0f) - (hitBoxW / 2.0f),
+                playerWorldPos.y + standardHeight - hitBoxH,
+                hitBoxW,
+                hitBoxH
+            };
+
+            // --- AREA-BASED COLLISION ---
+            auto isSolidArea = [&](Rectangle box) {
+                int leftTile = box.x / TILE_SIZE;
+                int rightTile = (box.x + box.width - 0.01f) / TILE_SIZE;
+                int topTile = box.y / TILE_SIZE;
+                int bottomTile = (box.y + box.height - 0.01f) / TILE_SIZE;
+
+                for (int y = topTile; y <= bottomTile; y++) {
+                    for (int x = leftTile; x <= rightTile; x++) {
+                        int tileVal = GetTileAt(x, y);
+                        if (tileVal == 1 || tileVal == 2) return true; 
+                    }
+                }
+                return false;
+            };
+
+            // Process X and Y independently so sliding along walls feels smooth
+            Rectangle nextXBox = playerHitBox; nextXBox.x += moveX;
+            
+            if (!isSolidArea(nextXBox)) {
+                playerWorldPos.x += moveX;
+                playerHitBox.x += moveX; // Update local hitbox for the Y check
+            } else {
+                // THE FIX: Snap flush to the wall on the X axis
+                if (moveX > 0) { 
+                    // Moving Right: Snap right side of hitbox to left side of wall
+                    int tileX = (nextXBox.x + nextXBox.width) / TILE_SIZE;
+                    float wallX = tileX * TILE_SIZE;
+                    playerHitBox.x = wallX - nextXBox.width - 0.01f;
+                } else if (moveX < 0) { 
+                    // Moving Left: Snap left side of hitbox to right side of wall
+                    int tileX = nextXBox.x / TILE_SIZE;
+                    float wallX = (tileX + 1) * TILE_SIZE;
+                    playerHitBox.x = wallX + 0.01f;
+                }
+                // Reverse the math to lock the world position to the snapped hitbox
+                playerWorldPos.x = playerHitBox.x - ((standardWidth / 2.0f) - (hitBoxW / 2.0f));
+            }
+
+            Rectangle nextYBox = playerHitBox; nextYBox.y += moveY;
+            
+            if (!isSolidArea(nextYBox)) {
+                playerWorldPos.y += moveY;
+            } else {
+                // THE FIX: Snap flush to the wall on the Y axis
+                if (moveY > 0) { 
+                    // Moving Down: Snap bottom of hitbox to top of wall
+                    int tileY = (nextYBox.y + nextYBox.height) / TILE_SIZE;
+                    float wallY = tileY * TILE_SIZE;
+                    playerHitBox.y = wallY - nextYBox.height - 0.01f;
+                } else if (moveY < 0) { 
+                    // Moving Up: Snap top of hitbox to bottom of wall
+                    int tileY = nextYBox.y / TILE_SIZE;
+                    float wallY = (tileY + 1) * TILE_SIZE;
+                    playerHitBox.y = wallY + 0.01f;
+                }
+                // Reverse the math to lock the world position to the snapped hitbox
+                playerWorldPos.y = playerHitBox.y - (standardHeight - hitBoxH);
+            }
+
+            // --- MAP TRANSITION LOGIC ---
+            // Use the center of our fixed footprint for transitions!
+            int currentFootGridX = (playerHitBox.x + (hitBoxW / 2.0f)) / TILE_SIZE;
+            int currentFootGridY = (playerHitBox.y + (hitBoxH / 2.0f)) / TILE_SIZE;
+            int standingOnTile = GetTileAt(currentFootGridX, currentFootGridY);
+
+            if (currentActiveMap == 0 && standingOnTile == 3) {
+                currentActiveMap = 1;
+                playerWorldPos = { 5.0f * TILE_SIZE, 5.0f * TILE_SIZE }; 
+            } 
+            else if (currentActiveMap == 1 && standingOnTile == 4) {
+                currentActiveMap = 0;
+                playerWorldPos = { 34.0f * TILE_SIZE, 7.0f * TILE_SIZE }; 
+            }
+            // --- LEAVING THE BAR ---
+            else if (currentActiveMap == 0 && standingOnTile == 5) {
+                currentActiveMap = 2;
+                // Spawn above North door. Y=6 accounts for character height so feet hit Y=8.
+                playerWorldPos = { 20.0f * TILE_SIZE, 6.0f * TILE_SIZE }; 
+            }
+            else if (currentActiveMap == 0 && standingOnTile == 7) {
+                currentActiveMap = 2;
+                // THE FIX: Changed X from 19.0f to 20.0f to align perfectly with the door!
+                playerWorldPos = { 20.0f * TILE_SIZE, 17.0f * TILE_SIZE }; 
+            }
+            else if (currentActiveMap == 0 && standingOnTile == 8) {
+                currentActiveMap = 2;
+                // Spawn right of East door. Y=11 aligns feet with Y=13.
+                playerWorldPos = { 35.0f * TILE_SIZE, 11.0f * TILE_SIZE }; 
+            }
+            // --- ENTERING THE BAR ---
+            else if (currentActiveMap == 2 && standingOnTile == 6) {
+                currentActiveMap = 0;
+                // Spawn below inside North door. 
+                playerWorldPos = { 10.0f * TILE_SIZE, 1.0f * TILE_SIZE }; 
+            }
+            else if (currentActiveMap == 2 && standingOnTile == 9) {
+                currentActiveMap = 0;
+                // THE FIX: Y=13 ensures feet land at Y=15, safely above the bottom wall!
+                playerWorldPos = { 10.0f * TILE_SIZE, 13.0f * TILE_SIZE }; 
+            }
+            else if (currentActiveMap == 2 && standingOnTile == 10) {
+                currentActiveMap = 0;
+                // Y=5 aligns feet with Y=7.
+                playerWorldPos = { 36.0f * TILE_SIZE, 5.0f * TILE_SIZE }; 
+            }
+
+            // --- CAMERA LOGIC ---
+            exploreCamera.target = { playerWorldPos.x + (standardWidth / 2.0f), playerWorldPos.y + (standardHeight / 2.0f) };
+
+            // Dynamic camera bounds for all 3 maps
+            int activeMapWidth = (currentActiveMap == 0) ? 40 : (currentActiveMap == 1) ? 12 : 50;
+            int activeMapHeight = (currentActiveMap == 0) ? 18 : (currentActiveMap == 1) ? 12 : 30;
+
+            float minX = 0; float minY = 0;
+            float maxX = activeMapWidth * TILE_SIZE; float maxY = activeMapHeight * TILE_SIZE;
+            float viewWidth = 1920.0f / exploreCamera.zoom; float viewHeight = 1080.0f / exploreCamera.zoom;
+
+            if ((maxX - minX) < viewWidth) {
+                exploreCamera.target.x = minX + ((maxX - minX) / 2.0f);
+            } else {
+                if (exploreCamera.target.x - (viewWidth / 2.0f) < minX) exploreCamera.target.x = minX + (viewWidth / 2.0f);
+                if (exploreCamera.target.x + (viewWidth / 2.0f) > maxX) exploreCamera.target.x = maxX - (viewWidth / 2.0f);
+            }
+
+            if ((maxY - minY) < viewHeight) {
+                exploreCamera.target.y = minY + ((maxY - minY) / 2.0f);
+            } else {
+                if (exploreCamera.target.y - (viewHeight / 2.0f) < minY) exploreCamera.target.y = minY + (viewHeight / 2.0f);
+                if (exploreCamera.target.y + (viewHeight / 2.0f) > maxY) exploreCamera.target.y = maxY - (viewHeight / 2.0f);
+            }
+
+            // --- DRAWING ---
+            BeginDrawing(); ClearBackground(BLACK); 
+            BeginMode2D(exploreCamera);
+
+            // Draw the correct map dynamically!
+            for (int y = 0; y < activeMapHeight; y++) {
+                for (int x = 0; x < activeMapWidth; x++) {
+                    Rectangle tileRec = { (float)(x * TILE_SIZE), (float)(y * TILE_SIZE), (float)TILE_SIZE, (float)TILE_SIZE };
+                    int tileVal = GetTileAt(x, y);
+
+                    if (tileVal == 1) { DrawRectangleRec(tileRec, DARKGRAY); DrawRectangleLinesEx(tileRec, 1, BLACK); }
+                    else if (tileVal == 2) DrawRectangleRec(tileRec, BROWN); 
+                    else if (tileVal == 3 || tileVal == 4) DrawRectangleRec(tileRec, DARKBLUE); 
+                    else if (tileVal >= 5 && tileVal <= 10) DrawRectangleRec(tileRec, ORANGE); // All 6 doors are orange!
+                    else {
+                        // If it's a Floor (0), draw it differently based on the map
+                        if (currentActiveMap == 2) DrawRectangleRec(tileRec, DARKGREEN); // Grass for Outside
+                        else DrawRectangleRec(tileRec, LIGHTGRAY); // Wood/Tile for Inside
+                    }
+                }
+            }
+
+            float widthOffset = (standardWidth - pWidth) / 2.0f; // Centers thinner/wider sprites
+            float heightOffset = pHeight - standardHeight;       // Anchors taller sprites to the floor
+
+            Rectangle sourceRec = { 0.0f, 0.0f, (float)playerTex.width * playerFacing, (float)playerTex.height };
+            
+            Rectangle destRec = { playerWorldPos.x + widthOffset, playerWorldPos.y - heightOffset, pWidth, pHeight };
+            
+            DrawTexturePro(playerTex, sourceRec, destRec, {0,0}, 0.0f, WHITE);
+            
+            EndMode2D();
+    
+            DrawText("EXPLORATION MODE", 50, 50, 30, WHITE);
+            DrawText("[ WASD to Move | SHIFT to Sprint | TAB for Menu | B for Debug Hub ]", 50, 90, 20, LIGHTGRAY);
+            
+            // Opens the new Quick Menu
+            if (IsKeyReleased(KEY_TAB)) {
+                currentScreen = MENU;
+            }
+
+            // Keeps your teleport back to the testing Hub
+            if (IsKeyReleased(KEY_B)) {
+                currentScreen = HUB;
+            }
+            
+            EndDrawing();
+        }
         else if (currentScreen == RESTING) {
             BeginDrawing(); ClearBackground(BLACK);
             DrawText("ZZZ...", 1920/2 - MeasureText("ZZZ...", 100)/2, 400, 100, SKYBLUE);
@@ -261,7 +887,11 @@ int main() {
             if (DrawMenuButton({100, 300, 500, 60}, "1. Buy Bandage ($10)", (wallet >= 10) ? GRAY : RED) || IsKeyPressed(KEY_ONE)) { if (wallet >= 10) { wallet -= 10; inventory[0]++; } }
             if (DrawMenuButton({100, 380, 500, 60}, "2. Buy Energy Drink ($15)", (wallet >= 15) ? GRAY : RED) || IsKeyPressed(KEY_TWO)) { if (wallet >= 15) { wallet -= 15; inventory[1]++; } }
             if (DrawMenuButton({100, 460, 500, 60}, "3. Buy Revive ($30)", (wallet >= 30) ? GRAY : RED) || IsKeyPressed(KEY_THREE)) { if (wallet >= 30) { wallet -= 30; inventory[2]++; } }
-            if (DrawMenuButton({100, 600, 300, 60}, "4. Back to Hub [B]", DARKGRAY) || IsKeyPressed(KEY_B)) currentScreen = HUB;
+            // Change this to return to MENU instead of HUB
+            if (DrawMenuButton({100, 850, 300, 60}, "Back [B]", GRAY, false) || IsKeyReleased(KEY_B)) { 
+                swapGroup = -1; 
+                currentScreen = previousScreen; // <--- THE MAGIC FIX
+            }
             EndDrawing();
         }
         else if (currentScreen == PARTY) {
@@ -312,7 +942,11 @@ int main() {
             DrawText("BENCH:", 800, 160, 30, GRAY);
             for (int i=0; i<bench.size() + 1; i++) DrawSlot({800, 200.0f + (i * 60), 300, 50}, 2, i); 
 
-            if (DrawMenuButton({100, 850, 300, 60}, "Back to Hub [B]", GRAY, bgDisabled) || IsKeyReleased(KEY_B)) { swapGroup = -1; currentScreen = HUB; }
+            // Change this to return to MENU instead of HUB
+            if (DrawMenuButton({100, 850, 300, 60}, "Back [B]", GRAY, false) || IsKeyReleased(KEY_B)) { 
+                swapGroup = -1; 
+                currentScreen = previousScreen; // <--- THE MAGIC FIX
+            }
             EndDrawing();
         }
         else if (currentScreen == CUSTOMIZE && selectedCharForCustomization != nullptr) {
@@ -343,15 +977,19 @@ int main() {
                 
                 Rectangle fullSource = {0, 0, (float)tex.width, (float)tex.height}; 
                 
-                // ---> THE FIX: Calculate the scale to fit comfortably inside the 340px tall box! <---
-                float scale = 260.0f / tex.height; // Forces the sprite to be exactly 260 pixels tall
-                float scaledWidth = tex.width * scale;
-                float scaledHeight = tex.height * scale;
+                // ---> THE FIX: Floor Anchoring Math <---
+                float pixelScale = 10.0f; 
                 
-                // Automatically center the scaled sprite inside the blue box
+                float scaledWidth = tex.width * pixelScale;
+                float scaledHeight = tex.height * pixelScale;
+                
+                // Anchor the floor to just above the bottom line of the blue box
+                float floorY = boxDest.y + boxDest.height - 10.0f;
+                
+                // Center it horizontally in the box, and anchor the bottom to the floor
                 Rectangle fullDest = { 
-                    boxDest.x + (boxDest.width / 2) - (scaledWidth / 2), 
-                    boxDest.y + (boxDest.height / 2) - (scaledHeight / 2), 
+                    boxDest.x + (boxDest.width / 2.0f) - (scaledWidth / 2.0f), 
+                    floorY - scaledHeight, 
                     scaledWidth, 
                     scaledHeight 
                 };
@@ -687,7 +1325,11 @@ int main() {
             // ADDED THE NATURALS TAB
             if (DrawMenuButton({100, 480, 300, 60}, "5. Naturals", (activeTab == 4) ? GOLD : GRAY, bgDisabled)) { activeTab = 4; scrollY = 0; }
             // SHIFTED THIS TO #6
-            if (DrawMenuButton({100, 900, 300, 60}, "6. Back to Hub [B]", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyReleased(KEY_B))) { currentScreen = HUB; scrollY = 0; }
+            // Replace your existing "6. Back to Hub [B]" line in ENCYCLOPEDIA with this:
+            if (DrawMenuButton({100, 900, 300, 60}, "6. Back [B]", DARKGRAY, bgDisabled) || (!bgDisabled && IsKeyReleased(KEY_B))) { 
+                currentScreen = previousScreen; 
+                scrollY = 0; 
+            }
 
             DrawRectangle(450, 150, 1400, 800, Fade(BLACK, 0.8f)); DrawRectangleLines(450, 150, 1400, 800, WHITE);
 
@@ -871,5 +1513,10 @@ int main() {
     UnloadTexture(texVince);
     UnloadTexture(texJoe);
     UnloadTexture(texJustin);
+
+    UnloadTexture(texTony);
+
+    UnloadTexture(texBully);
+    UnloadTexture(texThug);
     CloseWindow(); return 0;
 }

@@ -22,7 +22,7 @@ static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string n
 }
 
 Entity buildScrawnyThug() {
-    Entity thug = buildBaseStats(EntityID::ScrawnyThug, ActorID::Enemy, "Scrawny Thug", LifeStage::Young, false,
+    Entity thug = buildBaseStats(EntityID::ScrawnyThug, ActorID::ScrawnyThug, "Scrawny Thug", LifeStage::Young, false,
                                    20, 6, 3, 5, 2, 3, NaturalID::None);
 
     thug.combatMenu.push_back( getMove(MoveID::Strike));
@@ -33,7 +33,7 @@ Entity buildScrawnyThug() {
 }
 
 Entity buildStreetThug() {
-    Entity thug = buildBaseStats(EntityID::StreetThug, ActorID::Enemy, "Street Thug", LifeStage::Young, false,
+    Entity thug = buildBaseStats(EntityID::StreetThug, ActorID::StreetThug, "Street Thug", LifeStage::Young, false,
                                    20, 6, 3, 5, 2, 3, NaturalID::None);
 
     thug.combatMenu.push_back( getMove(MoveID::Strike));

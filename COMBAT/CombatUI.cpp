@@ -24,9 +24,9 @@ Entity* animDying = nullptr;
 int deathFadeAlpha = 255;        
 
 Vector2 GetBasePos(Entity* e, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam) {
-    // Shifted down to Y = 100 to leave room for Damage Popups!
-    Vector2 pPos[3] = { {200, 100}, {350, 240}, {200, 380} };
-    Vector2 ePos[3] = { {1600, 100}, {1450, 240}, {1600, 380} };
+    // Shrunk down to the native 320x180 canvas size
+    Vector2 pPos[3] = { {33, 16}, {58, 40}, {33, 63} };
+    Vector2 ePos[3] = { {266, 16}, {241, 40}, {266, 63} };
     
     for (int i = 0; i < pTeam.size(); i++) {
         if (pTeam[i] == e) return pPos[i];
@@ -52,264 +52,208 @@ bool DrawGUIButton(Rectangle rect, const char* text, int hotkey, bool disabled =
 }
 
 void DrawBattleOverlay(std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, int momentum) {
-    // 1. Draw Main UI Backgrounds
-    DrawRectangle(0, 600, 1920, 480, DARKGRAY);
-    DrawRectangleLines(0, 600, 1920, 480, WHITE);
-
-    // Momentum Bar (Moved to Top Center of UI)
-    DrawText("MOMENTUM:", 700, 615, 25, YELLOW);
-    DrawRectangle(860, 620, 200, 15, BLACK);
-    DrawRectangle(860, 620, momentum * 2, 15, YELLOW);
-
-    // 2. Draw Player UI Profiles (Left Side)
-    int uiY = 650;
-    for (int i = 0; i < playerTeam.size(); i++) {
-        Entity* p = playerTeam[i];
-        if (!p) continue;
-        
-        // Profile Picture
-        Rectangle profileRect = { 50, (float)uiY, 80, 80 };
-        if (globalSprites.count(p->actorID)) {
-            Texture2D tex = globalSprites[p->actorID];
-            
-            // ---> THE FIX: Use the texture's width to grab a perfect square from the top! <---
-            Rectangle sourceCrop = {0, 0, (float)tex.width, (float)tex.width}; 
-            
-            DrawTexturePro(tex, sourceCrop, profileRect, {0,0}, 0.0f, p->isAlive ? WHITE : DARKGRAY);
-            DrawRectangleLinesEx(profileRect, 2, WHITE);
-        } else {
-            // Fallback for characters without sprites
-            DrawRectangleRec(profileRect, p->isAlive ? BLUE : DARKGRAY);
-            DrawRectangleLinesEx(profileRect, 2, WHITE);
-            DrawText(p->name.substr(0, 3).c_str(), 65, uiY + 30, 20, WHITE); 
-        }
-        
-        if (!p->isAlive) {
-            DrawText("KNOCKED OUT", 150, uiY + 30, 20, RED);
-            uiY += 120;
-            continue;
-        }
-
-        // Name & Level
-        DrawText(TextFormat("%s [Lv %d]", p->name.c_str(), p->level), 150, uiY, 20, WHITE);
-
-        // HP Text & Stacked Bar
-        int displayHP = p->currentHP + p->shieldHP;
-        DrawText(TextFormat("HP: %d / %d", displayHP, p->maxHP), 150, uiY + 25, 18, GREEN);
-        
-        DrawRectangle(150, uiY + 45, 200, 15, BLACK);
-        float hpPercent = (float)p->currentHP / p->maxHP;
-        if (hpPercent > 1.0f) hpPercent = 1.0f;
-        DrawRectangle(150, uiY + 45, hpPercent * 200, 15, GREEN);
-        
-        // Add Blue Shield to the Bar
-        if (p->shieldHP > 0) {
-            float shieldPercent = (float)p->shieldHP / p->maxHP;
-            if (hpPercent + shieldPercent > 1.0f) shieldPercent = 1.0f - hpPercent;
-            DrawRectangle(150 + (hpPercent * 200), uiY + 45, shieldPercent * 200, 15, SKYBLUE);
-        }
-
-        // Stamina Text & Bar
-        DrawText(TextFormat("STM: %d / %d", p->currentStamina, p->maxStamina), 150, uiY + 65, 18, YELLOW);
-        DrawRectangle(150, uiY + 85, 200, 15, BLACK);
-        float stamPercent = (float)p->currentStamina / p->maxStamina;
-        DrawRectangle(150, uiY + 85, stamPercent * 200, 15, YELLOW);
-
-        // --- NEW: STACKED STATUS ICONS ---
-        int statX = 370;
-        int statY = uiY + 20;
-        
-        std::map<std::string, int> statusCounts;
-        std::map<std::string, Color> statusColors;
-        std::vector<std::string> displayOrder; 
-
-        for (auto& s : p->activeStatuses) {
-            std::string label = ""; Color statCol = WHITE;
-            
-            if (s.category == StatusCategory::Buff || s.category == StatusCategory::Debuff) {
-                std::string statStr = (s.statModifier > 0) ? "UP" : "DOWN";
-                statCol = (s.statModifier > 0) ? GREEN : RED;
-                
-                if (s.targetStat == StatName::ATK) label = "ATK " + statStr;
-                else if (s.targetStat == StatName::DEF) label = "DEF " + statStr;
-                else if (s.targetStat == StatName::SPD) label = "SPD " + statStr;
-                else if (s.targetStat == StatName::BIQ) label = "BIQ " + statStr;
-                else if (s.targetStat == StatName::SIQ) label = "SIQ " + statStr;
-            } else {
-                label = s.name; statCol = RED;
-            }
-
-            if (label != "") {
-                if (statusCounts[label] == 0) {
-                    displayOrder.push_back(label);
-                    statusColors[label] = statCol;
-                }
-                statusCounts[label]++;
-            }
-        }
-
-        // Draw the grouped statuses
-        for (const std::string& label : displayOrder) {
-            std::string finalText = label;
-            if (statusCounts[label] > 1) finalText += " x" + std::to_string(statusCounts[label]);
-                         
-            DrawText(finalText.c_str(), statX, statY, 15, statusColors[label]);
-            statY += 20;
-            
-            // ---> THE FIX: Increase statX shift from 60 to 100 <---
-            if (statY > uiY + 80) { statY = uiY + 20; statX += 100; } 
-        }
-        uiY += 120;
-    }
-
-    // 3. Scrollable Combat Log (Right Side)
-    static int combatLogScrollY = 0;
-    static int lastLogCount = 0; 
-         
-    Rectangle logRec = { 1200, 600, 720, 480 }; 
-    DrawRectangleRec(logRec, Fade(BLACK, 0.5f));
-    DrawRectangleLinesEx(logRec, 2, WHITE);
-    DrawText("COMBAT LOG", 1220, 620, 25, LIGHTGRAY);
-         
-    std::vector<std::string> logs = GameLog::GetMessages(); 
-    int totalLogHeight = logs.size() * 30; 
-    int maxScroll = 0;
-    if (totalLogHeight > 410) { 
-         maxScroll = -(totalLogHeight - 410); 
-    }
-         
-    // --- THE FIX: BULLETPROOF AUTO-SCROLL ---
-    int currentTotalLogs = GameLog::GetTotalMessagesLogged();
+    // --- 1. DRAW NATIVE WORLD (Background + Characters) ---
+    Camera2D combatCam = { 0 };
+    combatCam.zoom = 6.0f;
     
-    // If the log was cleared for a new battle, reset our UI tracker!
-    if (currentTotalLogs < lastLogCount) {
-        lastLogCount = currentTotalLogs;
-    }
-
-    // If a new message was added, instantly snap the view to the bottom
-    if (currentTotalLogs > lastLogCount) {
-        combatLogScrollY = maxScroll;
-        lastLogCount = currentTotalLogs;
-    }
-    // ----------------------------------------
-         
-    if (combatLogScrollY < maxScroll) combatLogScrollY = maxScroll;
-    if (combatLogScrollY > 0) combatLogScrollY = 0;
+    BeginMode2D(combatCam);
     
-    // Manual scrolling still works!
-    if (CheckCollisionPointRec(GetMousePosition(), logRec)) {
-        combatLogScrollY += GetMouseWheelMove() * 30;
-        if (combatLogScrollY > 0) combatLogScrollY = 0;
-        if (combatLogScrollY < maxScroll) combatLogScrollY = maxScroll;
-    }
-    
-    // WIDENED SCISSOR MODE TO MATCH
-    BeginScissorMode(1200, 660, 720, 410);
-    int logY = 670 + combatLogScrollY;
-    for (std::string& msg : logs) { 
-         DrawText(msg.c_str(), 1220, logY, 20, WHITE); 
-         logY += 30; 
-     }
-    EndScissorMode();
+    // (Your friend's 320x180 background texture will eventually be drawn right here!)
 
-    // 4. Draw Sprites in V-Formation
+    float nativeBaseline = 25.0f; // Native floor height
+
+    // Draw Player Sprites
     for (Entity* p : playerTeam) {
         if (!p->isAlive && p != animDying && p != animTarget) continue;
                  
-        Color tint = WHITE; Color textColor = WHITE;
-        if (p == animDying) { 
-            float a = deathFadeAlpha / 255.0f;
-            tint = Fade(WHITE, a); textColor = Fade(textColor, a); 
-        }
+        Color tint = WHITE; 
+        if (p == animDying) tint = Fade(WHITE, deathFadeAlpha / 255.0f); 
                  
         Vector2 drawPos = GetBasePos(p, playerTeam, enemyTeam);
         if (p == animAttacker) drawPos = animAttackerPos;
         if (p == animTarget) { drawPos.x += animTargetOffset.x; drawPos.y += animTargetOffset.y; }
-                 
-        float targetScreenHeight = 150.0f; // Adjusts everyones height
-
-        // --- DRAWING MATH ---
-        float pixelScale = GameConfig::PLAYER_SCALE;
 
         if (globalSprites.count(p->actorID)) { 
             Texture2D activeTexture = globalSprites[p->actorID];
             if (p == animAttacker && globalAttackSprites.count(p->actorID)) {
                 activeTexture = globalAttackSprites[p->actorID];
             }
-            
-            float scaledWidth = activeTexture.width * pixelScale;
-            float scaledHeight = activeTexture.height * pixelScale;
             Rectangle fullSource = {0, 0, (float)activeTexture.width, (float)activeTexture.height};
-            
-            // Bottom-aligned to the 150px baseline
-            Rectangle destRect = { drawPos.x, drawPos.y + (150.0f - scaledHeight), scaledWidth, scaledHeight };
+            Rectangle destRect = { drawPos.x, drawPos.y + (nativeBaseline - activeTexture.height), (float)activeTexture.width, (float)activeTexture.height };
             DrawTexturePro(activeTexture, fullSource, destRect, {0,0}, 0.0f, tint);
         } else {
-            // Fallback dynamically matches what a 40x40 sprite would look like
-            float fallbackSize = 40.0f * pixelScale;
-            DrawRectangle((int)drawPos.x, (int)(drawPos.y + (150.0f - fallbackSize)), fallbackSize/2, fallbackSize, BLUE); 
+            DrawRectangle((int)drawPos.x, (int)(drawPos.y + (nativeBaseline - 8.0f)), 4, 8, BLUE); 
         }
-                 
-        // X shifted to -10 to center the name over the thinner sprite
-        DrawText(p->name.c_str(), drawPos.x - 10, drawPos.y - 30, 25, textColor);
     }
     
+    // Draw Enemy Sprites
     for (Entity* e : enemyTeam) {
         if (!e->isAlive && e != animDying && e != animTarget) continue;
                  
-        Color hpColor = RED; Color bodyColor = RED; Color textColor = WHITE; Color barBgColor = BLACK;
         Color tint = WHITE; 
-                 
-        if (e == animDying) { 
-            float a = deathFadeAlpha / 255.0f;
-            hpColor = Fade(hpColor, a); bodyColor = Fade(bodyColor, a);
-            textColor = Fade(textColor, a); barBgColor = Fade(barBgColor, a);
-            tint = Fade(WHITE, a); 
-        }
+        if (e == animDying) tint = Fade(WHITE, deathFadeAlpha / 255.0f); 
                  
         Vector2 drawPos = GetBasePos(e, playerTeam, enemyTeam);
         if (e == animAttacker) drawPos = animAttackerPos;
         if (e == animTarget) { drawPos.x += animTargetOffset.x; drawPos.y += animTargetOffset.y; }
-                 
-        float targetScreenHeight = 150.0f; // Adjusts everyones height
-
-        // --- DRAWING MATH ---
-        float pixelScale = GameConfig::ENEMY_SCALE;
 
         if (globalSprites.count(e->actorID)) { 
             Texture2D activeTexture = globalSprites[e->actorID];
             if (e == animAttacker && globalAttackSprites.count(e->actorID)) {
                 activeTexture = globalAttackSprites[e->actorID];
             }
-            
-            float scaledWidth = activeTexture.width * pixelScale;
-            float scaledHeight = activeTexture.height * pixelScale;
             Rectangle fullSource = {0, 0, (float)activeTexture.width, (float)activeTexture.height};
-            
-            // Bottom-aligned to the 150px baseline
-            Rectangle destRect = { drawPos.x, drawPos.y + (150.0f - scaledHeight), scaledWidth, scaledHeight };
+            Rectangle destRect = { drawPos.x, drawPos.y + (nativeBaseline - activeTexture.height), (float)activeTexture.width, (float)activeTexture.height };
             DrawTexturePro(activeTexture, fullSource, destRect, {0,0}, 0.0f, tint);
         } else {
-            // Fallback dynamically matches what a 40x40 sprite would look like
-            float fallbackSize = 40.0f * pixelScale;
-            DrawRectangle((int)drawPos.x, (int)(drawPos.y + (150.0f - fallbackSize)), fallbackSize/2, fallbackSize, RED); 
+            DrawRectangle((int)drawPos.x, (int)(drawPos.y + (nativeBaseline - 8.0f)), 4, 8, RED); 
         }
-                 
-        // X shifted to -10 to center the name over the thinner sprite
-        DrawText(e->name.c_str(), drawPos.x - 10, drawPos.y - 30, 25, textColor);
-                 
-        // Enemy HP and Shield Bars centered under the sprite
+    }
+    EndMode2D(); // TURN OFF CAMERA
+
+    // --- 2. DRAW 1080p UI ---
+    DrawRectangle(0, 600, 1920, 480, DARKGRAY);
+    DrawRectangleLines(0, 600, 1920, 480, WHITE);
+
+    DrawText("MOMENTUM:", 700, 615, 25, YELLOW);
+    DrawRectangle(860, 620, 200, 15, BLACK);
+    DrawRectangle(860, 620, momentum * 2, 15, YELLOW);
+
+    int uiY = 650;
+    for (int i = 0; i < playerTeam.size(); i++) {
+        Entity* p = playerTeam[i];
+        if (!p) continue;
+        
+        Rectangle profileRect = { 50, (float)uiY, 80, 80 };
+        if (globalSprites.count(p->actorID)) {
+            Texture2D tex = globalSprites[p->actorID];
+            Rectangle sourceCrop = {0, 0, (float)tex.width, (float)tex.width}; 
+            DrawTexturePro(tex, sourceCrop, profileRect, {0,0}, 0.0f, p->isAlive ? WHITE : DARKGRAY);
+            DrawRectangleLinesEx(profileRect, 2, WHITE);
+        } else {
+            DrawRectangleRec(profileRect, p->isAlive ? BLUE : DARKGRAY); DrawRectangleLinesEx(profileRect, 2, WHITE);
+            DrawText(p->name.substr(0, 3).c_str(), 65, uiY + 30, 20, WHITE); 
+        }
+        
+        if (!p->isAlive) { DrawText("KNOCKED OUT", 150, uiY + 30, 20, RED); uiY += 120; continue; }
+
+        DrawText(TextFormat("%s [Lv %d]", p->name.c_str(), p->level), 150, uiY, 20, WHITE);
+
+        int displayHP = p->currentHP + p->shieldHP;
+        DrawText(TextFormat("HP: %d / %d", displayHP, p->maxHP), 150, uiY + 25, 18, GREEN);
+        DrawRectangle(150, uiY + 45, 200, 15, BLACK);
+        float hpPercent = (float)p->currentHP / p->maxHP; if (hpPercent > 1.0f) hpPercent = 1.0f;
+        DrawRectangle(150, uiY + 45, hpPercent * 200, 15, GREEN);
+        
+        if (p->shieldHP > 0) {
+            float shieldPercent = (float)p->shieldHP / p->maxHP;
+            if (hpPercent + shieldPercent > 1.0f) shieldPercent = 1.0f - hpPercent;
+            DrawRectangle(150 + (hpPercent * 200), uiY + 45, shieldPercent * 200, 15, SKYBLUE);
+        }
+
+        DrawText(TextFormat("STM: %d / %d", p->currentStamina, p->maxStamina), 150, uiY + 65, 18, YELLOW);
+        DrawRectangle(150, uiY + 85, 200, 15, BLACK);
+        float stamPercent = (float)p->currentStamina / p->maxStamina;
+        DrawRectangle(150, uiY + 85, stamPercent * 200, 15, YELLOW);
+
+        int statX = 370; int statY = uiY + 20;
+        std::map<std::string, int> statusCounts; std::map<std::string, Color> statusColors; std::vector<std::string> displayOrder; 
+
+        for (auto& s : p->activeStatuses) {
+            std::string label = ""; Color statCol = WHITE;
+            if (s.category == StatusCategory::Buff || s.category == StatusCategory::Debuff) {
+                std::string statStr = (s.statModifier > 0) ? "UP" : "DOWN"; statCol = (s.statModifier > 0) ? GREEN : RED;
+                if (s.targetStat == StatName::ATK) label = "ATK " + statStr; else if (s.targetStat == StatName::DEF) label = "DEF " + statStr;
+                else if (s.targetStat == StatName::SPD) label = "SPD " + statStr; else if (s.targetStat == StatName::BIQ) label = "BIQ " + statStr; else if (s.targetStat == StatName::SIQ) label = "SIQ " + statStr;
+            } else { label = s.name; statCol = RED; }
+
+            if (label != "") {
+                if (statusCounts[label] == 0) { displayOrder.push_back(label); statusColors[label] = statCol; }
+                statusCounts[label]++;
+            }
+        }
+        for (const std::string& label : displayOrder) {
+            std::string finalText = label; if (statusCounts[label] > 1) finalText += " x" + std::to_string(statusCounts[label]);
+            DrawText(finalText.c_str(), statX, statY, 15, statusColors[label]); statY += 20;
+            if (statY > uiY + 80) { statY = uiY + 20; statX += 100; } 
+        }
+        uiY += 120;
+    }
+
+    // COMBAT LOG
+    static int combatLogScrollY = 0; static int lastLogCount = 0; 
+    Rectangle logRec = { 1200, 600, 720, 480 }; 
+    DrawRectangleRec(logRec, Fade(BLACK, 0.5f)); DrawRectangleLinesEx(logRec, 2, WHITE); DrawText("COMBAT LOG", 1220, 620, 25, LIGHTGRAY);
+         
+    std::vector<std::string> logs = GameLog::GetMessages(); 
+    int totalLogHeight = logs.size() * 30; 
+    int maxScroll = 0; if (totalLogHeight > 410) maxScroll = -(totalLogHeight - 410); 
+         
+    int currentTotalLogs = GameLog::GetTotalMessagesLogged();
+    if (currentTotalLogs < lastLogCount) lastLogCount = currentTotalLogs;
+    if (currentTotalLogs > lastLogCount) { combatLogScrollY = maxScroll; lastLogCount = currentTotalLogs; }
+         
+    if (combatLogScrollY < maxScroll) combatLogScrollY = maxScroll;
+    if (combatLogScrollY > 0) combatLogScrollY = 0;
+    if (CheckCollisionPointRec(GetMousePosition(), logRec)) {
+        combatLogScrollY += GetMouseWheelMove() * 30;
+        if (combatLogScrollY > 0) combatLogScrollY = 0; if (combatLogScrollY < maxScroll) combatLogScrollY = maxScroll;
+    }
+    
+    BeginScissorMode(1200, 660, 720, 410);
+    int logY = 670 + combatLogScrollY;
+    for (std::string& msg : logs) { DrawText(msg.c_str(), 1220, logY, 20, WHITE); logY += 30; }
+    EndScissorMode();
+
+    // 3. DRAW DYNAMIC OVERLAYS IN 1080P SPACE
+    
+    // --- ADD THIS BLOCK FOR PLAYER NAMES ---
+    for (Entity* p : playerTeam) {
+        if (!p->isAlive && p != animDying && p != animTarget) continue;
+        
+        Vector2 drawPos = GetBasePos(p, playerTeam, enemyTeam);
+        if (p == animAttacker) drawPos = animAttackerPos;
+        if (p == animTarget) { drawPos.x += animTargetOffset.x; drawPos.y += animTargetOffset.y; }
+        
+        // Translates native position to 1080p screen placement!
+        float screenX = drawPos.x * 6.0f;
+        float screenY = drawPos.y * 6.0f;
+        
+        Color textColor = WHITE;
+        if (p == animDying) textColor = Fade(textColor, deathFadeAlpha / 255.0f);
+        
+        DrawText(p->name.c_str(), screenX - 10, screenY - 30, 25, textColor);
+    }
+
+    // 3. DRAW ENEMY OVERLAYS IN 1080P SPACE
+    for (Entity* e : enemyTeam) {
+        if (!e->isAlive && e != animDying && e != animTarget) continue;
+        
+        Vector2 drawPos = GetBasePos(e, playerTeam, enemyTeam);
+        if (e == animAttacker) drawPos = animAttackerPos;
+        if (e == animTarget) { drawPos.x += animTargetOffset.x; drawPos.y += animTargetOffset.y; }
+        
+        // Translates native position to 1080p screen placement!
+        float screenX = drawPos.x * 6.0f;
+        float screenY = drawPos.y * 6.0f;
+        
+        Color hpColor = RED; Color textColor = WHITE; Color barBgColor = BLACK;
+        if (e == animDying) { 
+            float a = deathFadeAlpha / 255.0f;
+            hpColor = Fade(hpColor, a); textColor = Fade(textColor, a); barBgColor = Fade(barBgColor, a);
+        }
+        
+        DrawText(e->name.c_str(), screenX - 10, screenY - 30, 25, textColor);
+        
         if (e->shieldHP > 0) {
             int shieldWidth = (e->shieldHP * 140) / e->maxHP;
             if (shieldWidth > 140) shieldWidth = 140; 
-            DrawRectangle(drawPos.x - 35, drawPos.y + 155, 140, 10, barBgColor);
-            DrawRectangle(drawPos.x - 35, drawPos.y + 155, shieldWidth, 10, SKYBLUE);
+            DrawRectangle(screenX - 35, screenY + 155, 140, 10, barBgColor);
+            DrawRectangle(screenX - 35, screenY + 155, shieldWidth, 10, SKYBLUE);
         }
-                 
-        // HP Bar and Fraction Text centered under the sprite
-        DrawRectangle(drawPos.x - 35, drawPos.y + 165, 140, 15, barBgColor); 
-        DrawRectangle(drawPos.x - 35, drawPos.y + 165, (e->currentHP * 140) / e->maxHP, 15, hpColor);
-        DrawText(TextFormat("%d / %d", e->currentHP, e->maxHP), drawPos.x - 35, drawPos.y + 185, 20, textColor);
+        DrawRectangle(screenX - 35, screenY + 165, 140, 15, barBgColor); 
+        DrawRectangle(screenX - 35, screenY + 165, (e->currentHP * 140) / e->maxHP, 15, hpColor);
+        DrawText(TextFormat("%d / %d", e->currentHP, e->maxHP), screenX - 35, screenY + 185, 20, textColor);
     }
 }
 
@@ -319,7 +263,9 @@ void AnimateApproach(Entity* attacker, Entity* target, std::vector<Entity*>& pTe
     else { start = GetBasePos(attacker, pTeam, eTeam); }
     
     Vector2 end = GetBasePos(target, pTeam, eTeam);
-    if (start.x < end.x) end.x -= 120; else end.x += 120; 
+    
+    // --- THE FIX: Shrunk the 1080p distance (120) down to native space (20) ---
+    if (start.x < end.x) end.x -= 20; else end.x += 20; 
     
     animAttacker = attacker;
     for (int i=0; i<=10; i++) { 
@@ -351,20 +297,62 @@ void AnimateHit(Entity* target, int damage, bool isCrit, bool isDodge, std::vect
         popupText = std::to_string(damage); 
         if (isCrit) { popupText += " CRIT!"; popColor = YELLOW; } else popColor = WHITE;
     }
-    Vector2 baseT = GetBasePos(target, pTeam, eTeam);
+    
+    // --- THE FIX: Track dynamically if the character is currently moving! ---
+    Vector2 activePos = GetBasePos(target, pTeam, eTeam);
+    if (target == animAttacker) activePos = animAttackerPos;
+
     for (int i=0; i<durationFrames; i++) { 
         if (!isDodge && damage >= 0 && i < 15) { 
-            animTargetOffset.x = (GetRandomValue(0, 20) - 10);
-            animTargetOffset.y = (GetRandomValue(0, 20) - 10);
+            // Shrink the native shake so they don't vibrate wildly out of bounds
+            animTargetOffset.x = (GetRandomValue(0, 20) - 10) / 6.0f; 
+            animTargetOffset.y = (GetRandomValue(0, 20) - 10) / 6.0f;
         } else {
             animTargetOffset = {0,0}; 
         }
+        
+        // Re-calculate screen position every frame because the target might be shaking!
+        float screenX = (activePos.x + animTargetOffset.x) * 6.0f;
+        float screenY = (activePos.y + animTargetOffset.y) * 6.0f;
+
         BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum);
         int slideUp = (i < 20) ? (i*2) : 40;
-        DrawText(popupText.c_str(), baseT.x + 20, baseT.y - 40 - slideUp, isCrit? 40 : 30, popColor);
+        
+        DrawText(popupText.c_str(), screenX + 10, screenY - 50 - slideUp, isCrit? 40 : 30, popColor);
         EndDrawing();
     }
     animTargetOffset = {0,0}; animTarget = nullptr;
+}
+
+void AnimatePopupsForEntity(Entity* target, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum) {
+    if (target->pendingPopups.empty()) return;
+
+    // --- THE FIX: Track dynamically if the character is currently moving! ---
+    Vector2 activePos = GetBasePos(target, pTeam, eTeam);
+    if (target == animAttacker) activePos = animAttackerPos;
+    if (target == animTarget) { activePos.x += animTargetOffset.x; activePos.y += animTargetOffset.y; }
+
+    // Translate Native Space to 1080p Screen Space
+    float screenX = activePos.x * 6.0f;
+    float screenY = activePos.y * 6.0f;
+
+    for (auto& popup : target->pendingPopups) {
+        Color pCol = popup.isBuff ? GREEN : RED; 
+
+        for (int i=0; i<30; i++) {
+            BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum);
+
+            int slideUp = i; 
+            float alpha = 1.0f;
+            if (i > 40) alpha = 1.0f - ((i - 40) / 20.0f); 
+
+            // Safely anchor the text directly above their head
+            DrawText(popup.text.c_str(), screenX - 10, screenY - 40 - slideUp, 20, Fade(pCol, alpha));
+
+            EndDrawing();
+        }
+    }
+    target->pendingPopups.clear();
 }
 
 void AnimateDeath(Entity* target, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum) {
@@ -382,38 +370,11 @@ void AnimateSupport(Entity* caster, std::vector<Entity*>& pTeam, std::vector<Ent
     Vector2 base = GetBasePos(caster, pTeam, eTeam);
     for (int i=0; i<20; i++) { 
         animAttackerPos = base;
-        animAttackerPos.y -= (i < 10) ? i*2 : (20-i)*2; 
+        // --- THE FIX: Shrunk the jump peak down to 4 pixels natively ---
+        animAttackerPos.y -= (i < 10) ? (i * 0.4f) : ((20 - i) * 0.4f); 
         BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum); EndDrawing();
     }
     animAttacker = nullptr;
-}
-
-void AnimatePopupsForEntity(Entity* target, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum) {
-    if (target->pendingPopups.empty()) return;
-
-    bool isPlayer = false;
-    for (auto* p : pTeam) if (p == target) isPlayer = true;
-
-    Vector2 baseT = GetBasePos(target, pTeam, eTeam);
-
-    for (auto& popup : target->pendingPopups) {
-        float offsetX = popup.isBuff ? (isPlayer ? 110 : -60) : (isPlayer ? -60 : 110);              
-        Color pCol = popup.isBuff ? GREEN : RED; 
-
-        // Increased from 30 to 60 frames!
-        for (int i=0; i<30; i++) {
-            BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(pTeam, eTeam, momentum);
-
-            int slideUp = i; // Rises slower
-            float alpha = 1.0f;
-            if (i > 40) alpha = 1.0f - ((i - 40) / 20.0f); // Fades out smoothly at the very end
-
-            DrawText(popup.text.c_str(), baseT.x + offsetX, baseT.y + 60 - slideUp, 20, Fade(pCol, alpha));
-
-            EndDrawing();
-        }
-    }
-    target->pendingPopups.clear();
 }
 
 void AnimatePhaseTransition(int phaseNum, std::vector<Entity*>& pTeam, std::vector<Entity*>& eTeam, int momentum) {
@@ -483,40 +444,44 @@ std::vector<Entity*> requestPlayerTargets(Entity* attacker, const Move& selected
     if (targetsNeeded > aliveCount) targetsNeeded = aliveCount; if (targetsNeeded == 0) return selectedTargets;
     
     while (selectedTargets.size() < targetsNeeded && !WindowShouldClose()) {
-            BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, 0);
-            
-            // --- ALIGNED TO THE NEW MAIN MENU BOUNDS ---
-            DrawRectangle(550, 650, 630, 400, Fade(DARKPURPLE, 0.6f)); 
-            DrawRectangleLines(550, 650, 630, 400, PURPLE);
-            
-            DrawText(TextFormat("SELECT TARGET(S) FOR: %s (%d needed)", selectedMove.name.c_str(), targetsNeeded - selectedTargets.size()), 580, 670, 25, WHITE);
-            DrawText("[ HOVER OVER A TARGET AND CLICK, OR PRESS 'B' TO CANCEL ]", 580, 710, 18, LIGHTGRAY);
-            
-            for (Entity* e : validPool) {
+        BeginDrawing(); ClearBackground(DARKBLUE); DrawBattleOverlay(playerTeam, enemyTeam, 0);
+        
+        DrawRectangle(550, 650, 630, 400, Fade(DARKPURPLE, 0.6f)); 
+        DrawRectangleLines(550, 650, 630, 400, PURPLE);
+        
+        DrawText(TextFormat("SELECT TARGET(S) FOR: %s (%d needed)", selectedMove.name.c_str(), targetsNeeded - selectedTargets.size()), 580, 670, 25, WHITE);
+        DrawText("[ HOVER OVER A TARGET AND CLICK, OR PRESS 'B' TO CANCEL ]", 580, 710, 18, LIGHTGRAY);
+        
+        // --- TRANSLATE MOUSE TO WORLD SPACE ---
+        Camera2D combatCam = { 0 }; combatCam.zoom = 6.0f;
+        Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), combatCam);
+
+        for (Entity* e : validPool) {
             if (e->isAlive) {
                 Vector2 pos = GetBasePos(e, playerTeam, enemyTeam);
                 
-                // --- HITBOX MATH ---
-                // Check if the target is a player to determine the correct scale
-                bool isPlayerTarget = (std::find(playerTeam.begin(), playerTeam.end(), e) != playerTeam.end());
-                float pixelScale = isPlayerTarget ? GameConfig::PLAYER_SCALE : GameConfig::ENEMY_SCALE;
-                
-                float hitboxW = 20.0f * pixelScale; // Fallback width
-                float hitboxH = 40.0f * pixelScale; // Fallback height
+                float hitboxW = 6.0f; 
+                float hitboxH = 8.0f; 
                 
                 if (globalSprites.count(e->actorID)) { 
-                    hitboxW = globalSprites[e->actorID].width * pixelScale;
-                    hitboxH = globalSprites[e->actorID].height * pixelScale;
+                    hitboxW = globalSprites[e->actorID].width;
+                    hitboxH = globalSprites[e->actorID].height;
                 }
                 
-                // Matches the drawing baseline perfectly!
-                Rectangle targetBox = { pos.x, pos.y + (150.0f - hitboxH), hitboxW, hitboxH };
+                // Matches the native baseline height!
+                Rectangle targetBox = { pos.x, pos.y + (25.0f - hitboxH), hitboxW, hitboxH };
+                
+                // --- THE FIX: Translate native hitbox to 1080p screen space for drawing! ---
+                Rectangle screenBox = { targetBox.x * 6.0f, targetBox.y * 6.0f, targetBox.width * 6.0f, targetBox.height * 6.0f };
                 
                 bool alreadySelected = (std::find(selectedTargets.begin(), selectedTargets.end(), e) != selectedTargets.end());
-                if (alreadySelected) { DrawRectangleLinesEx(targetBox, 3, GREEN); DrawText("SELECTED", targetBox.x, targetBox.y - 30, 20, GREEN); } 
-                else {
-                    if (CheckCollisionPointRec(GetMousePosition(), targetBox)) {
-                        DrawRectangleLinesEx(targetBox, 3, YELLOW); DrawText("TARGET", targetBox.x, targetBox.y - 30, 20, YELLOW);
+                if (alreadySelected) { 
+                    DrawRectangleLinesEx(screenBox, 4, GREEN);
+                    DrawText("SELECTED", screenBox.x - 15, screenBox.y - 30, 20, GREEN); 
+                } else {
+                    if (CheckCollisionPointRec(mouseWorldPos, targetBox)) {
+                        DrawRectangleLinesEx(screenBox, 4, YELLOW);
+                        DrawText("TARGET", screenBox.x - 5, screenBox.y - 30, 20, YELLOW);
                         if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) selectedTargets.push_back(e);
                     }
                 }
@@ -558,23 +523,24 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
         // 1. Update this line so the main menu hides when you open the Active Skills menu!
         bool isMainMenu = (!inItemMenu && !inReviveMenu && !inTeamUpMenu && !inSwapMenu && !inActiveMenu);
         
-        // 2. Keep your sprite clicking block right here at the top
+        // Setup mouse translation for sprites
+        Camera2D combatCam = { 0 }; combatCam.zoom = 6.0f;
+        Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), combatCam);
+        Vector2 mouseScreenPos = GetMousePosition();
+
         if (!showDetailsPopup) {
             // Check Enemy Sprite Clicks
             for (Entity* e : enemyTeam) {
                 if (!e->isAlive) continue; 
                 Vector2 pos = GetBasePos(e, playerTeam, enemyTeam);
                 
-                float pixelScale = GameConfig::ENEMY_SCALE;
-                float hitboxW = 20.0f * pixelScale;
-                float hitboxH = 40.0f * pixelScale;
+                float hitboxW = 6.0f; float hitboxH = 8.0f;
                 if (globalSprites.count(e->actorID)) {
-                    hitboxW = globalSprites[e->actorID].width * pixelScale;
-                    hitboxH = globalSprites[e->actorID].height * pixelScale;
+                    hitboxW = globalSprites[e->actorID].width; hitboxH = globalSprites[e->actorID].height;
                 }
-                Rectangle targetBox = { pos.x, pos.y + (150.0f - hitboxH), hitboxW, hitboxH };
+                Rectangle targetBox = { pos.x, pos.y + (25.0f - hitboxH), hitboxW, hitboxH };
 
-                if (CheckCollisionPointRec(GetMousePosition(), targetBox) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = e; detailsType = 5; showDetailsPopup = true; }
+                if (CheckCollisionPointRec(mouseWorldPos, targetBox) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = e; detailsType = 5; showDetailsPopup = true; }
             }
             
             // Check Player Sprite AND Profile Clicks
@@ -583,20 +549,17 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 if (!p->isAlive) continue; 
                 Vector2 pos = GetBasePos(p, playerTeam, enemyTeam);
                 
-                float pixelScale = GameConfig::PLAYER_SCALE;
-                float hitboxW = 20.0f * pixelScale;
-                float hitboxH = 40.0f * pixelScale;
+                float hitboxW = 6.0f; float hitboxH = 8.0f;
                 if (globalSprites.count(p->actorID)) {
-                    hitboxW = globalSprites[p->actorID].width * pixelScale;
-                    hitboxH = globalSprites[p->actorID].height * pixelScale;
+                    hitboxW = globalSprites[p->actorID].width; hitboxH = globalSprites[p->actorID].height;
                 }
-                Rectangle targetBox = { pos.x, pos.y + (150.0f - hitboxH), hitboxW, hitboxH };
+                Rectangle targetBox = { pos.x, pos.y + (25.0f - hitboxH), hitboxW, hitboxH };
 
-                // Hitbox for Sprite
-                if (CheckCollisionPointRec(GetMousePosition(), targetBox) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
+                // Hitbox for Sprite (Native World Space)
+                if (CheckCollisionPointRec(mouseWorldPos, targetBox) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
                 
-                // Hitbox for Profile Picture
-                if (CheckCollisionPointRec(GetMousePosition(), {50, 650.0f + (i * 120), 80, 80}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
+                // Hitbox for Profile Picture (1080p Screen Space)
+                if (CheckCollisionPointRec(mouseScreenPos, {50, 650.0f + (i * 120), 80, 80}) && IsMouseButtonReleased(MOUSE_RIGHT_BUTTON)) { detailedEntity = p; detailsType = 5; showDetailsPopup = true; }
             }
         }
         

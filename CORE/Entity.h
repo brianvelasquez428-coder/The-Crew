@@ -27,7 +27,7 @@ enum class EntityID {
 
 // ActorID handles generic identification for features like Team-Up requirements
 enum class ActorID { 
-    Brian, Paul, Vince, Joe, Justin, Tony, Enemy 
+    Brian, Paul, Vince, Joe, Justin, Tony, ScrawnyThug, StreetThug, Enemy 
 };
 
 // --- THE NEW MOVE CATEGORY ENUM ---
