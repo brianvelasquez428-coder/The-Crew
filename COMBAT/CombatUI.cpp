@@ -78,8 +78,8 @@ void DrawBattleOverlay(std::vector<Entity*>& playerTeam, std::vector<Entity*>& e
             if (p == animAttacker && globalAttackSprites.count(p->actorID)) {
                 activeTexture = globalAttackSprites[p->actorID];
             }
-            Rectangle fullSource = {0, 0, (float)activeTexture.width, (float)activeTexture.height};
-            Rectangle destRect = { drawPos.x, drawPos.y + (nativeBaseline - activeTexture.height), (float)activeTexture.width, (float)activeTexture.height };
+            Rectangle fullSource = {0, 0, 32.0f, 32.0f};
+            Rectangle destRect = { drawPos.x, drawPos.y + (nativeBaseline - 32.0f), 32.0f, 32.0f };
             DrawTexturePro(activeTexture, fullSource, destRect, {0,0}, 0.0f, tint);
         } else {
             DrawRectangle((int)drawPos.x, (int)(drawPos.y + (nativeBaseline - 8.0f)), 4, 8, BLUE); 
@@ -102,8 +102,8 @@ void DrawBattleOverlay(std::vector<Entity*>& playerTeam, std::vector<Entity*>& e
             if (e == animAttacker && globalAttackSprites.count(e->actorID)) {
                 activeTexture = globalAttackSprites[e->actorID];
             }
-            Rectangle fullSource = {0, 0, (float)activeTexture.width, (float)activeTexture.height};
-            Rectangle destRect = { drawPos.x, drawPos.y + (nativeBaseline - activeTexture.height), (float)activeTexture.width, (float)activeTexture.height };
+            Rectangle fullSource = {0, 0, 32.0f, 32.0f};
+            Rectangle destRect = { drawPos.x, drawPos.y + (nativeBaseline - 32.0f), 32.0f, 32.0f };
             DrawTexturePro(activeTexture, fullSource, destRect, {0,0}, 0.0f, tint);
         } else {
             DrawRectangle((int)drawPos.x, (int)(drawPos.y + (nativeBaseline - 8.0f)), 4, 8, RED); 
@@ -127,7 +127,8 @@ void DrawBattleOverlay(std::vector<Entity*>& playerTeam, std::vector<Entity*>& e
         Rectangle profileRect = { 50, (float)uiY, 80, 80 };
         if (globalSprites.count(p->actorID)) {
             Texture2D tex = globalSprites[p->actorID];
-            Rectangle sourceCrop = {0, 0, (float)tex.width, (float)tex.width}; 
+            // Lock the crop to the first 32x32 frame
+            Rectangle sourceCrop = {0, 0, 32.0f, 32.0f}; 
             DrawTexturePro(tex, sourceCrop, profileRect, {0,0}, 0.0f, p->isAlive ? WHITE : DARKGRAY);
             DrawRectangleLinesEx(profileRect, 2, WHITE);
         } else {
@@ -464,8 +465,8 @@ std::vector<Entity*> requestPlayerTargets(Entity* attacker, const Move& selected
                 float hitboxH = 8.0f; 
                 
                 if (globalSprites.count(e->actorID)) { 
-                    hitboxW = globalSprites[e->actorID].width;
-                    hitboxH = globalSprites[e->actorID].height;
+                    hitboxW = 32.0f;
+                    hitboxH = 32.0f;
                 }
                 
                 // Matches the native baseline height!
@@ -536,7 +537,7 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 
                 float hitboxW = 6.0f; float hitboxH = 8.0f;
                 if (globalSprites.count(e->actorID)) {
-                    hitboxW = globalSprites[e->actorID].width; hitboxH = globalSprites[e->actorID].height;
+                    hitboxW = 32.0f; hitboxH = 32.0f;
                 }
                 Rectangle targetBox = { pos.x, pos.y + (25.0f - hitboxH), hitboxW, hitboxH };
 
@@ -551,7 +552,7 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
                 
                 float hitboxW = 6.0f; float hitboxH = 8.0f;
                 if (globalSprites.count(p->actorID)) {
-                    hitboxW = globalSprites[p->actorID].width; hitboxH = globalSprites[p->actorID].height;
+                    hitboxW = 32.0f; hitboxH = 32.0f;
                 }
                 Rectangle targetBox = { pos.x, pos.y + (25.0f - hitboxH), hitboxW, hitboxH };
 

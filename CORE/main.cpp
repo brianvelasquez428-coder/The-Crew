@@ -91,10 +91,10 @@ int main() {
     srand(time(NULL)); InitWindow(1920, 1080, "The Crew - Pre-Alpha"); SetTargetFPS(60);
 
     // --- NEW: LOAD TEXTURES ---
-    Texture2D texBrian = LoadTexture("BmanRightFaceRightLight.png");
-    Texture2D texPaulIdle = LoadTexture("P_RightFaceRightLight.png");
-    Texture2D texPaulPunch = LoadTexture("P_RightPunchRightLight.png");
-    Texture2D texVince = LoadTexture("BobbyRightFaceRightLight.png");
+    Texture2D texBrian = LoadTexture("BmanSpriteSheet.png");
+    Texture2D texPaulIdle = LoadTexture("PSpriteSheet.png");
+    Texture2D texPaulPunch = LoadTexture("P_RightPunchRightLight.png"); // You can keep the old punch for now
+    Texture2D texVince = LoadTexture("BobbySpriteSheet.png");
     Texture2D texJoe = LoadTexture("Joe.png");
     Texture2D texJustin = LoadTexture("Justin.png");
 
@@ -294,7 +294,7 @@ int main() {
             
             DrawText("THE CREW", 1920/2 - MeasureText("THE CREW", 80)/2, 200, 80, RED);
             // ---> NEW: Version Subtitle <---
-            DrawText("v1.3 Pre-Alpha", 1920/2 - MeasureText("v1.3 Pre-Alpha", 30)/2, 290, 30, GRAY);
+            DrawText("v1.4 Pre-Alpha", 1920/2 - MeasureText("v1.4 Pre-Alpha", 30)/2, 290, 30, GRAY);
             
             bool hasSave = SaveSystem::DoesSaveExist(); int startX = 1920/2 - 200;
             if (hasSave) {
@@ -517,9 +517,13 @@ int main() {
 
                 // Helper lambda to cleanly draw and anchor cutscene characters
                 auto DrawCutsceneSprite = [&](Texture2D tex, float xPos, float yPosFloor, int facing) {
-                    float wOffset = (standardWidth - tex.width) / 2.0f;
-                    Rectangle src = {0, 0, (float)tex.width * facing, (float)tex.height};
-                    Rectangle dest = {xPos + wOffset, yPosFloor - tex.height, (float)tex.width, (float)tex.height};
+                    float frameWidth = 32.0f;
+                    float frameHeight = 32.0f;
+                    float wOffset = (standardWidth - frameWidth) / 2.0f;
+                    
+                    // Lock the source and destination to exactly 32x32
+                    Rectangle src = {0, 0, frameWidth * facing, frameHeight};
+                    Rectangle dest = {xPos + wOffset, yPosFloor - frameHeight, frameWidth, frameHeight};
                     DrawTexturePro(tex, src, dest, {0,0}, 0.0f, WHITE);
                 };
 
@@ -667,18 +671,49 @@ int main() {
 
             // THE FIX: Only update the visual facing direction if they are actively moving left or right!
             // If they hold both, moveX is 0, so this gets skipped and they keep facing their original direction.
+            bool isMoving = (moveX != 0 || moveY != 0);
+
             if (moveX < 0) {
                 playerFacing = -1;
             } else if (moveX > 0) {
                 playerFacing = 1;
             }
 
+            // --- ANIMATION LOGIC ---
+            static float frameTimer = 0.0f;
+            static int currentFrame = 0;
+
+            if (isMoving) {
+                // Instantly step into the walk cycle (Frame 1) so there is no slide delay
+                if (currentFrame == 0) {
+                    currentFrame = 1;
+                    frameTimer = 0.0f;
+                } else {
+                    frameTimer += dt;
+                    float frameSpeed = (currentSpeed > 60.0f) ? 0.08f : 0.15f; // Faster animation if sprinting
+                    if (frameTimer >= frameSpeed) {
+                        frameTimer = 0.0f;
+                        currentFrame++;
+                        
+                        // Loop from the 2nd image (index 1) to the 5th image (index 4)
+                        if (currentFrame > 4) {
+                            currentFrame = 1; 
+                        }
+                    }
+                }
+            } else {
+                currentFrame = 0; // Return to the first standing image when stopped
+                frameTimer = 0.0f;
+            }
+
             Texture2D playerTex = globalSprites[ActorID::Brian];
             if (activeParty[0] != nullptr && globalSprites.count(activeParty[0]->actorID)) {
                 playerTex = globalSprites[activeParty[0]->actorID];
             }
-            float pWidth = (float)playerTex.width;
-            float pHeight = (float)playerTex.height;
+            
+            // Lock size to a single frame so it doesn't try to draw the whole 192px sheet
+            float pWidth = 32.0f;
+            float pHeight = 32.0f;
 
             // --- THE FIX: UNIVERSAL PHYSICS FOOTPRINT ---
             float standardWidth = 10.0f;  // Universal base width
@@ -852,7 +887,8 @@ int main() {
             float widthOffset = (standardWidth - pWidth) / 2.0f; // Centers thinner/wider sprites
             float heightOffset = pHeight - standardHeight;       // Anchors taller sprites to the floor
 
-            Rectangle sourceRec = { 0.0f, 0.0f, (float)playerTex.width * playerFacing, (float)playerTex.height };
+            // Cut out the specific 32x32 frame we are currently on
+            Rectangle sourceRec = { (float)currentFrame * pWidth, 0.0f, pWidth * playerFacing, pHeight };
             
             Rectangle destRec = { playerWorldPos.x + widthOffset, playerWorldPos.y - heightOffset, pWidth, pHeight };
             
@@ -961,7 +997,8 @@ int main() {
                 Rectangle profileDest = { (float)(100 + textWidth + 20), 20, 60, 60 };
                 
                 // ---> THE FIX: Dynamic square crop <---
-                Rectangle sourceCrop = {0, 0, (float)tex.width, (float)tex.width}; 
+                // Grab just the first 32x32 frame
+                Rectangle sourceCrop = {0, 0, 32.0f, 32.0f};
                 
                 DrawTexturePro(tex, sourceCrop, profileDest, {0,0}, 0.0f, WHITE);
                 DrawRectangleLinesEx(profileDest, 2, WHITE);
@@ -975,13 +1012,13 @@ int main() {
                 DrawRectangleRec(boxDest, DARKBLUE);
                 DrawRectangleLinesEx(boxDest, 2, WHITE);
                 
-                Rectangle fullSource = {0, 0, (float)tex.width, (float)tex.height}; 
+                Rectangle fullSource = {0, 0, 32.0f, 32.0f}; 
                 
                 // ---> THE FIX: Floor Anchoring Math <---
                 float pixelScale = 10.0f; 
                 
-                float scaledWidth = tex.width * pixelScale;
-                float scaledHeight = tex.height * pixelScale;
+                float scaledWidth = 32.0f * pixelScale;
+                float scaledHeight = 32.0f * pixelScale;
                 
                 // Anchor the floor to just above the bottom line of the blue box
                 float floorY = boxDest.y + boxDest.height - 10.0f;
