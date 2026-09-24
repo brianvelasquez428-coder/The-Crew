@@ -1,7 +1,10 @@
+// Contains the foundation for the build of every character
 #pragma once
 #include <string>
 #include <vector>
+// =============== All the enum classes used to avoid typos for string uses ===============
 
+// Will be deleted, just used to distinguish multiple different versions of a character
 enum class LifeStage { Young, Teen, Adult };
 
 enum class MoveTarget { Self, OneEnemy, TwoEnemies, AllEnemies, OneAlly, TwoAllies, AllAllies };
@@ -13,11 +16,10 @@ enum class Effect {
     ClutchGrab, LightsOutStun, SelfAttackBuff10
 };
 
-// ---> NEW: The 3 Timing Windows <---
+// Determines if move effects should happen immediately without needing to connect, before it connects, or after it connects with a missed move of course not doing anything
 enum class EffectTiming { OnCast, PreHit, PostHit };
 
-// --- THE NEW ROSTER IDENTIFIERS ---
-// EntityID handles backend logic like level-up stats and specific boss phases
+// The background identity read by the computer for stats and phases that has every version separate
 enum class EntityID { 
     YoungBrian, YoungPaul, YoungVince, 
     YoungJoe, YoungJustin,
@@ -25,16 +27,17 @@ enum class EntityID {
     BossTony, StreetThug, ScrawnyThug, Unknown 
 };
 
-// ActorID handles generic identification for features like Team-Up requirements
+// The frontend identity that the player sees that encompasses all versions into one
 enum class ActorID { 
     Brian, Paul, Vince, Joe, Justin, Tony, ScrawnyThug, StreetThug, Enemy 
 };
 
-// --- THE NEW MOVE CATEGORY ENUM ---
+// Categorizes moves into certain types to vary in power and use
 enum class MoveCategory { 
     Basic, Skill, Ultimate, Support, TeamUp 
 };
 
+// A list of ALL the effects a character can have
 enum class StatusID { 
     None, TauntedATK, TauntedDEF, Taunting, DeepEndSIQ, DeepEndBIQ, 
     Bleed, GuardBreak, Hardened, Slowed, GuardBroken, BoggedDown, 
@@ -42,27 +45,32 @@ enum class StatusID {
     DemolitionistATK, DemolitionistBIQ, CrashOutATK, CrashOutDEF, 
     UnstoppableATK, UnstoppableSPD, LightFeet, HeavyHands, IronWill,
     CrashOutHitBuffATK, CrashOutHitBuffSPD, CrashOutExhaustion, StunImmunity,
-    SparringDEF, BasicAttackBuff // <--- ADD THIS HERE
+    SparringDEF, BasicAttackBuff
 };
 
+// The natural ability that everybody has that's essentially their "perk" for using them
 enum class NaturalID { 
     None, ScrewDat, CrashOut, Mediator, Sparring, UnstoppableAssault 
 };
 
+// A list of general abilities that can be added or removed from a character that trigger on their own either immediately or through a trigger (1 max)
 enum class PassiveID { 
     None, LightOnTheFeet, HeavyHands, IronWill, SlippingPunches, Combo 
 };
 
+// A list of general abilities that can be added or removed from a character that can be activated by the player once the conditions are met if there are any (2-3 if have passive or not)
 enum class ActiveID { 
     None, Adrenaline, Taunt, BodyWork, SlippingPunches, TheDeepEnd, 
     AnalyzeWeakness, RecklessAbandon, RealityCheck 
 };
 
-// We replace StatusType with StatusCategory for broader UI formatting
+// All the effect types in the game
 enum class StatusCategory { Buff, Debuff, DoT, HardCC, Special };
+
+// Everything that you can put an effect on
 enum class StatName { None, ATK, DEF, SPD, BIQ, SIQ };
 
-// The new Data-Driven Payload
+// The foundation build for any given effect used
 struct StatusEffect {
     StatusID id;
     std::string name;           
@@ -82,6 +90,7 @@ struct StatusEffect {
 
 std::string getStatusName(StatusID id);
 
+// All of the move names
 enum class MoveID {
     // Universal
     None, Guard,
@@ -109,6 +118,7 @@ enum class MoveID {
     Unknown
 };
 
+// The foundation build for any given move used
 struct Move {
     MoveID id;
     std::string name;
@@ -124,6 +134,7 @@ struct Move {
     bool ignoresEvasion;
 };
 
+// The foundation build for any given phase used
 struct PhaseData {
     int thresholdHP; std::string transitionText;
     int newAttack; int newDefense; int newSpeed; int newBIQ; int newSIQ;
@@ -133,18 +144,22 @@ struct PhaseData {
     std::vector<Move> newCombatMenu;
 };
 
+// Used for when effects show on screen to decide if its green or red
 struct StatusPopup {
     std::string text;
     bool isBuff;
 };
 
+// The foundation build for any given character made
 class Entity {
 public:
+    // Identity
     std::string name; 
     EntityID internalID;   // <--- Swapped to Enum
     ActorID actorID;       // <--- Added for TeamUps
     LifeStage currentStage; int currentPhase; bool isBoss;
     
+    // Stats
     int maxHP; int currentHP;
     int baseAttack; int currentAttack;
     int baseDefense; int currentDefense;
@@ -154,7 +169,7 @@ public:
     std::vector<PhaseData> extraPhases;      
     
     int maxStamina; int currentStamina; int staminaRegen;
-    
+    // Abilities
     NaturalID naturalAbility; bool naturalActiveUsedThisBattle;  
     bool hasCrashedOut; 
     bool mediatorAwakened;      
@@ -163,21 +178,23 @@ public:
     std::vector<ActiveID> activeAbilities;       
     std::vector<ActiveID> usedActives;      
     
+    // Menu, exp, and money
     std::vector<Move> combatMenu;                    
     int level; int currentEXP; int expToNextLevel;
     int expDropValue; int moneyDropValue;      
     bool isAltStance;                                
-    std::vector<Move> altCombatMenu;                 
+    std::vector<Move> altCombatMenu;   // holds a separate second moveset               
     
     void toggleStance();                             
     
-    // ---> FIX: Replaced std::string with Entity*
+    // Statuses or effects on a character
     bool isAlive; bool isGrabbed; Entity* grabbedBy;       
     int shieldHP; bool isCriticalOnlyShield;
     int hitNullificationStacks;
     
+    // Brian specific
     int screwDatStacks;        // Tracks the decaying Strike Ultimate power
-    int supportHealStacks;     // NEW: Tracks the permanent Support heal
+    int supportHealStacks;     // Tracks the permanent Support heal
     int screwDatDecayTimer;
     
     int tempDamageBonus;                  
@@ -192,10 +209,8 @@ public:
     
     Entity(std::string spawnName, LifeStage spawnStage, bool spawnIsBoss); 
     int takeDamage(int rawDamage, bool isCritical);         
-    // --- NEW: EVENT HOOKS ---
     int getDamageReduction();
-    void triggerOnHitPassives();
-    // ------------------------       
+    void triggerOnHitPassives();      
     void healHP(int amount);                                 
     void endOfTurnUpdate();                                  
     void regenerateStamina();                                
@@ -206,8 +221,8 @@ public:
     bool executeTeamUp(Entity& partner1, Entity& partner2, int staminaCost);        
     void calculateActiveStats();                             
     void checkBadges();     
-    std::vector<StatusPopup> pendingPopups;      // <--- ALREADY THERE
-    std::vector<std::string> pendingLogMessages; // <--- ADD THIS FOR COMBAT LOG DELAYS
+    std::vector<StatusPopup> pendingPopups;    
+    std::vector<std::string> pendingLogMessages; 
     bool checkPhaseTransition();            
     void resetStats();                                                                      
 };

@@ -1149,7 +1149,9 @@ void executePlayerTurn(Entity* character, std::vector<Entity*>& playerTeam, std:
 
 bool checkBattleEnd(std::vector<Entity*>& playerTeam, std::vector<Entity*>& enemyTeam, std::vector<Entity*>& masterRoster) {
     bool allEnemiesDead = true; for (Entity* enemy : enemyTeam) if (enemy->isAlive) allEnemiesDead = false;
-    bool allPlayersDead = true; for (Entity* player : playerTeam) if (player->isAlive) allPlayersDead = false;
+    bool allPlayersDead = true; for (Entity* player : playerTeam) if (player->isAlive) allPlayersDead = false; for (Entity* reserve : masterRoster) {
+    if (reserve != nullptr && reserve->isAlive) allPlayersDead = false; } // Add this line!
+    
          
     if (allEnemiesDead || allPlayersDead) {
         if (allEnemiesDead) GameLog::Add("VICTORY!"); if (allPlayersDead) GameLog::Add("DEFEAT...");

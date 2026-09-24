@@ -1,3 +1,4 @@
+// This file contains constants for easy changing of variables
 #pragma once 
 
 namespace GameConfig {

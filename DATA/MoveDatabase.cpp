@@ -91,7 +91,7 @@ const Move& getMove(MoveID moveID) {
         { MoveID::FaintPunches, buildBasic(MoveID::FaintPunches, "Faint Punches", 15, 2, MoveTarget::OneEnemy, Effect::None, 0.5f) },
         { MoveID::BrianSupportBasic, buildBasic(MoveID::BrianSupportBasic, "Basic (Support)", 0, 3, MoveTarget::OneEnemy, Effect::RestoreStamina, 0.7f) },
         { MoveID::BrianSupportSkill, buildSupport(MoveID::BrianSupportSkill, "Support Skill (+40% DEF & Nullify)", 40, MoveTarget::OneAlly, Effect::DefenseBuff40) },
-        { MoveID::BrianSupportUlt, buildUlt(MoveID::BrianSupportUlt, "Support Ultimate", 120, 0, MoveTarget::AllAllies, Effect::HealAndCleanse, 1.0f) },
+        { MoveID::BrianSupportUlt, buildUlt(MoveID::BrianSupportUlt, "Support Ultimate", 120, 0, MoveTarget::AllAllies, Effect::HealAndCleanse, 1.0f, true, EffectTiming::OnCast) },
         { MoveID::BrianStrikeBasic, buildBasic(MoveID::BrianStrikeBasic, "Basic (Strike)", 0, 4, MoveTarget::OneEnemy, Effect::LowerPriority, 0.5f) },
         { MoveID::BrianStrikeSkill, buildSkill(MoveID::BrianStrikeSkill, "Armor Piercer", 25, 1, MoveTarget::OneEnemy, Effect::StrikeDefenseDebuff, 1.5f, false, EffectTiming::PreHit) },
         { MoveID::BrianStrikeUlt, buildUlt(MoveID::BrianStrikeUlt, "Strike Ultimate", 120, 1, MoveTarget::OneEnemy, Effect::StrikeUlt, 3.0f, true) },

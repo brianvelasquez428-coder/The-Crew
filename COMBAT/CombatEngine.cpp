@@ -37,17 +37,24 @@ void executeEnemyTurn(Entity* character, std::vector<Entity*>& playerTeam, std::
     for (int i = 0; i < character->combatMenu.size(); i++) {
         if (character->currentStamina >= character->combatMenu[i].staminaCost) affordableMoves.push_back(character->combatMenu[i]);
     }
-    if (affordableMoves.empty()) affordableMoves.push_back(character->combatMenu[0]); 
-
+    if (affordableMoves.empty()) affordableMoves.push_back(character->combatMenu[0]);
+     
     Move selectedMove = affordableMoves[rand() % affordableMoves.size()];
-    character->currentStamina -= selectedMove.staminaCost;
+    
+    // --> THE FIX: Safely subtract stamina without going into debt
+    if (character->currentStamina >= selectedMove.staminaCost) {
+        character->currentStamina -= selectedMove.staminaCost;
+    } else {
+        character->currentStamina = 0; 
+    }
+    
     GameLog::Add(character->name + " uses " + selectedMove.name + "!");
     
     // ---> FIX: Prevent AI from targeting players with Self/Ally Support moves! <---
     std::vector<Entity*> bossTargets;
     if (selectedMove.target == MoveTarget::Self) {
         bossTargets.push_back(character);
-    } else if (selectedMove.target == MoveTarget::AllAllies) {
+    } else if (selectedMove.target == MoveTarget::AllAllies || selectedMove.target == MoveTarget::OneAlly || selectedMove.target == MoveTarget::TwoAllies) {
         for (Entity* e : enemyTeam) if (e->isAlive) bossTargets.push_back(e);
     } else {
         bossTargets = getAITargets(selectedMove, playerTeam);
@@ -117,7 +124,7 @@ void executeCombatRoutine(Entity* attacker, const Move& selectedMove, std::vecto
 
             for (int h = 1; h <= hitsLanded; h++) {
                 if (!target->isAlive) { GameLog::Add(target->name + " is down!"); break; }
-                int defenderEvasionStat = (target->name == "Brian" && !target->isAltStance) ? target->currentSIQ : target->currentBIQ; 
+                int defenderEvasionStat = (target->actorID == ActorID::Brian && !target->isAltStance) ? target->currentSIQ : target->currentBIQ;
                 int biqDifference = attacker->currentBIQ - defenderEvasionStat; 
                 int hitChance = 85 + (biqDifference / 2); 
                 if (hitChance > 100) hitChance = 100; if (hitChance < 20) hitChance = 20;

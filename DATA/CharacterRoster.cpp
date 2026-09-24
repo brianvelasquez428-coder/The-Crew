@@ -17,7 +17,7 @@ static Entity buildBaseStats(EntityID internalID, ActorID actorID, std::string n
     
     e.naturalAbility = naturalAbility; e.hiddenAbility = PassiveID::None;
     
-    // ---> FIX: Instantly populates current Attack, Defense, etc.
+    // FIX: Instantly populates current Attack, Defense, etc.
     e.calculateActiveStats(); 
     return e;
 }

@@ -230,9 +230,9 @@ void Entity::healHP(int amount) {
 }
 
 void Entity::endOfTurnUpdate() {
+    std::vector<StatusEffect> pendingStatuses; // <-- 1. Create a temporary holding bin
+
     for (auto it = activeStatuses.begin(); it != activeStatuses.end(); ) {
-        
-        // --- FIX: Data-Driven DoT routed to GameLog ---
         if (it->dotDamage > 0) {
             GameLog::Add("[" + it->name + "] " + name + " loses " + std::to_string(it->dotDamage) + " HP!");
             currentHP -= it->dotDamage;
@@ -241,7 +241,6 @@ void Entity::endOfTurnUpdate() {
         
         it->duration--;
         if (it->duration <= 0) {
-            // --- FIX: Expiration text routed to GameLog ---
             if (it->causesStun) GameLog::Add(name + " shook off the stun and is ready to fight!");
             else if (it->causesTaunt) GameLog::Add(name + " is no longer drawing attacks.");
             else if (it->halvesStaminaRegen) GameLog::Add(name + " catches their breath! (Stamina Regen restored)");
@@ -250,13 +249,19 @@ void Entity::endOfTurnUpdate() {
             // Paul's Exhaustion check
             if (it->id == StatusID::CrashOutDEF) {
                 GameLog::Add(name + "'s adrenaline fades... the crash out is over.");
-                addStatus({StatusID::CrashOutExhaustion, "Crash Out Exhaustion", StatusCategory::Debuff, StatName::DEF, (int)(-baseDefense * 0.50), 0, false, false, false, 2, false});
+                // <-- 2. Push to the temporary bin instead of calling addStatus directly!
+                pendingStatuses.push_back({StatusID::CrashOutExhaustion, "Crash Out Exhaustion", StatusCategory::Debuff, StatName::DEF, (int)(-baseDefense * 0.50), 0, false, false, false, 2, false});
             }
             
             it = activeStatuses.erase(it);
         } else {
             ++it;
         }
+    }
+
+    // <-- 3. Safely add the pending statuses now that the loop is over!
+    for (const auto& status : pendingStatuses) {
+        addStatus(status);
     }
     
     if (naturalAbility == NaturalID::ScrewDat) {
